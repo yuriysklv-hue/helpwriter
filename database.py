@@ -29,7 +29,7 @@ def init_database():
             assigned_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             is_active BOOLEAN DEFAULT 1,
-            preferred_style TEXT DEFAULT 'business_casual'
+            preferred_style TEXT DEFAULT 'transcription'
         )
     """)
 
@@ -39,7 +39,7 @@ def init_database():
 
     if 'preferred_style' not in columns:
         logger.info("🔄 Migrating database: adding preferred_style column")
-        cursor.execute("ALTER TABLE access_codes ADD COLUMN preferred_style TEXT DEFAULT 'business_casual'")
+        cursor.execute("ALTER TABLE access_codes ADD COLUMN preferred_style TEXT DEFAULT 'transcription'")
         conn.commit()
         logger.info("✅ Migration completed")
 
@@ -186,7 +186,7 @@ def create_auto_access_code(telegram_user_id: int) -> int:
     cursor.execute("""
         INSERT INTO access_codes
         (code, telegram_user_id, assigned_at, is_active, preferred_style)
-        VALUES (?, ?, CURRENT_TIMESTAMP, 1, 'business_casual')
+        VALUES (?, ?, CURRENT_TIMESTAMP, 1, 'transcription')
     """, (auto_code, telegram_user_id))
 
     access_code_id = cursor.lastrowid
@@ -331,7 +331,7 @@ def get_user_style(telegram_user_id: int) -> str:
 
     if result:
         return result[0]
-    return 'business_casual'  # Default style
+    return 'transcription'  # Default mode
 
 
 def set_user_style(telegram_user_id: int, style: str) -> bool:

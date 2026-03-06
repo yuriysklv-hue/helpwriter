@@ -1,10 +1,9 @@
 """
-Voice Assistant Bot - Version 2.0
-With access code authentication and usage analytics
+HelpWriter Bot - Version 2.1
+Writing assistant for blogs, websites, articles, and reviews.
 
-Version: 2.0.0
+Version: 2.1.0
 Author: Created with assistance from Claude
-Date: 11 January 2026
 """
 
 from dotenv import load_dotenv
@@ -15,12 +14,12 @@ import logging
 import asyncio
 import time
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, PrefixHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from openai import OpenAI
 import assemblyai as aai
 from pydub import AudioSegment
 from database import check_user_access, assign_code_to_user, log_usage, get_admin_stats, add_access_code, get_all_access_codes, get_user_style, set_user_style
-from style_prompts import get_style_prompt, get_style_name, get_style_description, get_all_styles, STYLE_NAMES, STYLE_DESCRIPTIONS, STYLE_PROMPTS
+from style_prompts import get_style_prompt, get_style_name, get_style_description, get_all_styles, STYLE_NAMES, STYLE_PROMPTS
 
 # =============================================================================
 # LOGGING CONFIGURATION
@@ -68,30 +67,6 @@ try:
     logger.info("✅ AssemblyAI client initialized successfully")
 except Exception as e:
     logger.error(f"❌ Failed to initialize AssemblyAI client: {e}")
-
-# =============================================================================
-# SYSTEM PROMPT (deprecated - using style_prompts.py instead)
-# =============================================================================
-
-SYSTEM_PROMPT = """You are a professional communication assistant. Your task is to refine voice transcriptions into well-structured, professional messages.
-
-Style guidelines:
-- Write in a professional yet casual business style (деловой casual)
-- Clear, respectful, and concise
-- Proper grammar and punctuation
-- Logical structure with paragraphs
-- Maintain the original meaning and tone
-- Remove filler words (um, uh, like, etc.)
-- Fix run-on sentences
-- Add appropriate formatting when helpful
-
-The input is a raw voice transcription that may contain:
-- Filler words and repetitions
-- Run-on sentences
-- Informal phrasing
-- Lack of punctuation
-
-Transform it into a polished, professional message while keeping the authentic voice of the speaker."""
 
 # =============================================================================
 # AUTHENTICATION MIDDLEWARE
@@ -159,22 +134,22 @@ async def transcribe_audio(audio_file_path: str) -> str:
 
 
 # =============================================================================
-# TEXT EDITING FUNCTION (DeepSeek)
+# TEXT PROCESSING FUNCTION (DeepSeek)
 # =============================================================================
 
-async def refine_text(raw_text: str, style: str = "business_casual") -> str:
-    """Refine text using DeepSeek model with specified style."""
+async def refine_text(raw_text: str, style: str = "transcription") -> str:
+    """Process text using DeepSeek model with specified mode."""
     try:
-        logger.info(f"Refining text with DeepSeek... Style: {style}")
+        logger.info(f"Processing text with DeepSeek... Mode: {style}")
 
-        # Get style-specific prompt
+        # Get mode-specific prompt
         style_prompt = get_style_prompt(style)
 
         response = deepseek_client.chat.completions.create(
             model="deepseek-chat",
             messages=[
                 {"role": "system", "content": style_prompt},
-                {"role": "user", "content": f"Отредактируй это сообщение:\n\n{raw_text}"}
+                {"role": "user", "content": f"Обработай этот текст:\n\n{raw_text}"}
             ],
             temperature=0.7
         )
@@ -183,51 +158,64 @@ async def refine_text(raw_text: str, style: str = "business_casual") -> str:
         return response.choices[0].message.content
 
     except Exception as e:
-        logger.error(f"❌ Error refining text: {e}")
-        raise Exception(f"Ошибка редактирования: {str(e)}")
+        logger.error(f"❌ Error processing text: {e}")
+        raise Exception(f"Ошибка обработки: {str(e)}")
 
 
 # =============================================================================
-# TELEGRAM HANDLERS
+# KEYBOARD HELPERS
 # =============================================================================
+
+def get_mode_keyboard():
+    """Get processing mode selection keyboard."""
+    keyboard = [
+        [KeyboardButton("✏️ Аккуратная транскрибация")],
+        [KeyboardButton("📋 Структура и план")],
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
 
 def get_main_keyboard(is_admin=False):
     """Get main menu keyboard based on user role."""
     if is_admin:
         keyboard = [
             [KeyboardButton("📊 Статистика"), KeyboardButton("📋 Коды")],
-            [KeyboardButton("➕ Добавить коды"), KeyboardButton("🎨 Стиль")],
+            [KeyboardButton("➕ Добавить коды")],
             [KeyboardButton("❓ Справка")],
         ]
     else:
-        keyboard = [
-            [KeyboardButton("🎨 Стиль")],
-        ]
+        keyboard = []
 
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True) if keyboard else None
 
+
+# Map button text to mode keys
+MODE_BUTTON_MAP = {
+    "✏️ Аккуратная транскрибация": "transcription",
+    "📋 Структура и план": "structure",
+}
+
+
+# =============================================================================
+# TELEGRAM HANDLERS
+# =============================================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command - show scenario selection keyboard for ALL users."""
-    user_id = update.effective_user.id
+    """Handle /start command - show mode selection keyboard."""
+    reply_markup = get_mode_keyboard()
 
-    # Show scenarios keyboard for EVERYONE (including admin)
-    scenario_keyboard = [
-        [KeyboardButton("📧 Email коллеге"), KeyboardButton("💬 Сообщение в чат")],
-        [KeyboardButton("📝 Документация"), KeyboardButton("✉️ Официальное письмо")],
-        [KeyboardButton("✏️ Аккуратно отредактировать")],
-    ]
-
-    reply_markup = ReplyKeyboardMarkup(scenario_keyboard, resize_keyboard=True)
-
-    welcome_message = """👋 Привет! Я — HelpWriter.
+    welcome_message = """👋 Привет! Я — HelpWriter, помощник для написания текстов.
 
 **Как это работает:**
-1. Выберите, что хотите создать
+1. Выберите режим обработки
 2. Отправьте голосовое или текст
 3. Получите готовый результат
 
-🎯 **Что хотите создать?**"""
+**Режимы:**
+✏️ Аккуратная транскрибация — диктуйте, я аккуратно отредактирую
+📋 Структура и план — диктуйте мысли, я верну план материала
+
+🎯 **Выберите режим:**"""
 
     await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -239,15 +227,13 @@ async def enter_code_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Check if already authenticated
     existing_code = check_user_access(user_id)
     if existing_code:
-        # Show menu for existing authenticated user
-        current_style = get_user_style(user_id)
-        reply_markup = get_main_keyboard(is_admin=False)
+        current_mode = get_user_style(user_id)
         await update.message.reply_text(
             f"✅ У вас уже есть доступ!\n\n"
             f"Ваш код: {existing_code}\n\n"
-            f"🎨 Текущий стиль: {get_style_name(current_style)}\n\n"
+            f"Текущий режим: {get_style_name(current_mode)}\n\n"
             f"Бот готов к работе.",
-            reply_markup=reply_markup
+            reply_markup=get_mode_keyboard()
         )
         return
 
@@ -264,16 +250,11 @@ async def enter_code_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Assign code to user
     success, message = assign_code_to_user(code, user_id)
 
-    # If code was successfully assigned, show menu
     if success:
-        current_style = get_user_style(user_id)
-        reply_markup = get_main_keyboard(is_admin=False)
-
-        # Add style info to message
-        style_info = f"\n\n🎨 Текущий стиль: {get_style_name(current_style)}\n\nИспользуй /style чтобы изменить стиль редактирования."
-        full_message = message + style_info
-
-        await update.message.reply_text(full_message, reply_markup=reply_markup)
+        await update.message.reply_text(
+            message + "\n\nВыберите режим обработки текста:",
+            reply_markup=get_mode_keyboard()
+        )
     else:
         await update.message.reply_text(message)
 
@@ -282,15 +263,12 @@ async def admin_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Handle /admin_stats command - only for admin."""
     user_id = update.effective_user.id
 
-    # Check if admin
     if user_id != ADMIN_ID:
         await update.message.reply_text("❌ У вас нет прав для этой команды.")
         return
 
-    # Get stats
     stats = get_admin_stats()
 
-    # Format stats message
     message = "📊 **Статистика использования бота**\n\n"
 
     for stat in stats:
@@ -325,7 +303,6 @@ async def seed_codes_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("❌ У вас нет прав для этой команды.")
         return
 
-    # Add codes from arguments
     if not context.args or len(context.args) == 0:
         existing_codes = get_all_access_codes()
         await update.message.reply_text(
@@ -357,49 +334,34 @@ async def handle_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     text = update.message.text
 
-    # Handle "Back" button - return to main menu
-    if text == "◀️ Назад":
-        is_admin = (user_id == ADMIN_ID)
-        reply_markup = get_main_keyboard(is_admin=is_admin)
-        await update.message.reply_text("🔙 Возврат в главное меню", reply_markup=reply_markup)
-        return
-
     # Only admin can use admin menu buttons
-    if user_id != ADMIN_ID and text in ["📊 Статистика", "📋 Коды", "➕ Добавить коды", "❓ Справка"]:
-        await update.message.reply_text("❌ Это меню только для администратора.")
-        return
+    if user_id != ADMIN_ID:
+        return False
 
-    # Handle style button (available to all authenticated users)
-    if text == "🎨 Стиль":
-        await style_command(update, context)
-        return
-
-    # Handle admin button clicks
     if text == "📊 Статистика":
         await admin_stats_command(update, context)
+        return True
     elif text == "📋 Коды":
         await list_codes_command(update, context)
+        return True
     elif text == "➕ Добавить коды":
         await update.message.reply_text(
             "➕ *Добавление кодов*\n\n"
             "Отправьте коды для добавления в формате:\n"
-            "`код1 код2 код3`\n\n"
-            "Или используйте команду:\n"
             "`/seed_codes код1 код2 код3`",
             parse_mode="Markdown"
         )
+        return True
     elif text == "❓ Справка":
         help_text = """❓ *Админ-справка*
 
 *Доступные команды:*
 
-📊 /admin_stats - Полная статистика по всем кодам
+📊 /admin\\_stats - Полная статистика по всем кодам
 
-📋 /seed_codes - Управление кодами доступа
+📋 /seed\\_codes - Управление кодами доступа
    • Без аргументов: показать существующие коды
    • С аргументами: `/seed_codes код1 код2 код3`
-
-➕ Кнопка "Добавить коды" - быстрое добавление
 
 *Через CLI на сервере:*
 ```bash
@@ -408,34 +370,10 @@ python manage_codes.py list
 python manage_codes.py stats
 python manage_codes.py remove код
 ```"""
-
         await update.message.reply_text(help_text, parse_mode="Markdown")
+        return True
 
-    # Handle style selection buttons
-    elif text in STYLE_NAMES.values():
-        # User clicked a style button
-        style_key = None
-        for key, name in STYLE_NAMES.items():
-            if name == text:
-                style_key = key
-                break
-
-        if style_key:
-            success = set_user_style(user_id, style_key)
-            if success:
-                # Return to main menu after style selection
-                is_admin = (user_id == ADMIN_ID)
-                reply_markup = get_main_keyboard(is_admin=is_admin)
-
-                await update.message.reply_text(
-                    f"✅ Стиль изменён на {get_style_name(style_key)}!\n\n"
-                    f"_{get_style_description(style_key)}_\n\n"
-                    f"📤 Теперь отправьте голосовое или текстовое сообщение для обработки.",
-                    reply_markup=reply_markup,
-                    parse_mode="Markdown"
-                )
-            else:
-                await update.message.reply_text("❌ Ошибка при изменении стиля")
+    return False
 
 
 async def list_codes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -446,8 +384,6 @@ async def list_codes_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("❌ У вас нет прав для этой команды.")
         return
 
-    codes = get_all_access_codes()
-    from database import init_database
     import sqlite3
     conn = sqlite3.connect("bot_database.db")
     cursor = conn.cursor()
@@ -469,7 +405,7 @@ async def list_codes_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         message += f"🔑 *{code}*\n"
         message += f"   {status}\n"
         message += f"   {user_info}\n"
-        message += f"   🎨 Стиль: {get_style_name(preferred_style)}\n"
+        message += f"   Режим: {get_style_name(preferred_style)}\n"
         if assigned_at:
             message += f"   📅 {assigned_at}\n"
         message += "\n"
@@ -477,152 +413,39 @@ async def list_codes_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(message, parse_mode="Markdown")
 
 
-async def style_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /style command - show style selection menu."""
-    user_id = update.effective_user.id
-
-    # Check if user is authenticated
-    access_code = check_user_access(user_id)
-    if not access_code and user_id != ADMIN_ID:
-        await update.message.reply_text(
-            "🔒 Сначала активируйте код доступа с помощью /enter_code"
-        )
-        return
-
-    # Get current style
-    current_style = get_user_style(user_id)
-
-    # Create style selection keyboard with Back button
-    style_keyboard = []
-    for style_key in get_all_styles():
-        style_keyboard.append([KeyboardButton(get_style_name(style_key))])
-
-    # Add "Back" button at the bottom
-    style_keyboard.append([KeyboardButton("◀️ Назад")])
-
-    reply_markup = ReplyKeyboardMarkup(style_keyboard, resize_keyboard=True)
-
-    message = f"""🎨 *Выбор стиля редактирования*
-
-Текущий стиль: {get_style_name(current_style)}
-
-*Доступные стили:*
-
-"""
-
-    for style_key in get_all_styles():
-        current_marker = "✅ " if style_key == current_style else ""
-        message += f"{current_marker}{get_style_name(style_key)}\n"
-        message += f"   _{get_style_description(style_key)}_\n\n"
-
-    message += "💡 Выберите стиль из меню ниже или используйте:\n`/set_style <стиль>`"
-
-    await update.message.reply_text(message, reply_markup=reply_markup, parse_mode="Markdown")
-
-
-async def set_style_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /set_style command - set specific style."""
-    user_id = update.effective_user.id
-
-    # Check authentication
-    access_code = check_user_access(user_id)
-    if not access_code and user_id != ADMIN_ID:
-        await update.message.reply_text("🔒 Сначала активируйте код доступа")
-        return
-
-    # Get style from arguments
-    if not context.args or len(context.args) == 0:
-        await update.message.reply_text(
-            "❌ Укажите стиль.\n\n"
-            "Доступные стили:\n"
-            "• business_casual - 👔 Business Casual\n"
-            "• formal - 🎩 Деловой строгий\n"
-            "• basic - ✏️ Базовый\n"
-            "• documentation - 📚 Документация\n"
-            "• team_chat - 💬 Командный\n\n"
-            "Пример: /set_style formal"
-        )
-        return
-
-    style_arg = context.args[0].strip().lower()
-
-    # Map style names/aliases to keys
-    style_map = {
-        "business_casual": "business_casual",
-        "business": "business_casual",
-        "casual": "business_casual",
-        "формальный": "formal",
-        "formal": "formal",
-        "официальный": "formal",
-        "базовый": "basic",
-        "basic": "basic",
-        "простой": "basic",
-        "документация": "documentation",
-        "documentation": "documentation",
-        "docs": "documentation",
-        "командный": "team_chat",
-        "team_chat": "team_chat",
-        "team": "team_chat",
-        "чат": "team_chat"
-    }
-
-    style_key = style_map.get(style_arg)
-
-    if not style_key:
-        await update.message.reply_text(
-            f"❌ Неизвестный стиль '{style_arg}'\n\n"
-            "Используйте /style чтобы увидеть доступные стили"
-        )
-        return
-
-    # Set user style
-    success = set_user_style(user_id, style_key)
-
-    if success:
-        await update.message.reply_text(
-            f"✅ Стиль изменён на {get_style_name(style_key)}!\n\n"
-            f"_{get_style_description(style_key)}_"
-        )
-    else:
-        await update.message.reply_text("❌ Ошибка при изменении стиля")
-
-
-async def handle_scenario_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle scenario selection from keyboard."""
-    user_id = update.effective_user.id
+async def handle_mode_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Handle processing mode selection from keyboard."""
     text = update.message.text
+    user_id = update.effective_user.id
 
-    # Map scenario names to style keys
-    scenario_to_style = {
-        "📧 Email коллеге": "business_casual",
-        "💬 Сообщение в чат": "team_chat",
-        "📝 Документация": "documentation",
-        "✉️ Официальное письмо": "formal",
-        "✏️ Аккуратно отредактировать": "basic"
-    }
+    if text not in MODE_BUTTON_MAP:
+        return False
 
-    # Check if selected text is a scenario
-    if text in scenario_to_style:
-        selected_style = scenario_to_style[text]
+    selected_mode = MODE_BUTTON_MAP[text]
 
-        # Store in context.user_data (session-based, not database)
-        context.user_data['selected_scenario'] = selected_style
-        context.user_data['scenario_name'] = text
+    # Store in context.user_data (session-based)
+    context.user_data['selected_scenario'] = selected_mode
+    context.user_data['scenario_name'] = text
 
-        logger.info(f"User {user_id} selected scenario: {text} ({selected_style})")
+    logger.info(f"User {user_id} selected mode: {text} ({selected_mode})")
 
-        # Show confirmation
-        confirmation_message = f"""✅ **Выбрано:** {text}
+    if selected_mode == "transcription":
+        confirmation = f"""✅ Режим: {text}
 
-Теперь отправьте голосовое или текст, который хотите отредактировать.
+Отправьте голосовое или текст — я аккуратно отредактирую, сохранив ваш стиль.
 
-🎤 Голосовое — я транскрибирую и отредактирую
-📝 Текст — я сразу отредактирую"""
+🎤 Голосовое — транскрибирую и отредактирую
+📝 Текст — сразу отредактирую"""
+    else:
+        confirmation = f"""✅ Режим: {text}
 
-        await update.message.reply_text(confirmation_message, parse_mode="Markdown")
-        return True
+Надиктуйте или напишите ваши мысли — я верну структурированный план материала.
 
-    return False
+🎤 Голосовое — транскрибирую и создам план
+📝 Текст — сразу создам план"""
+
+    await update.message.reply_text(confirmation, parse_mode="Markdown")
+    return True
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -630,26 +453,14 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     start_time = time.time()
 
-    # Get selected scenario from context (not database)
+    # Get selected mode from context (fallback to database preference)
     user_style = context.user_data.get('selected_scenario', get_user_style(user_id))
 
-    # If no scenario selected, prompt user to select one
+    # If no mode selected, prompt user to select one
     if user_style not in STYLE_PROMPTS:
-        scenario_keyboard = [
-            [KeyboardButton("📧 Email коллеге"), KeyboardButton("💬 Сообщение в чат")],
-            [KeyboardButton("📝 Документация"), KeyboardButton("✉️ Официальное письмо")],
-            [KeyboardButton("✏️ Аккуратно отредактировать")],
-        ]
-        reply_markup = ReplyKeyboardMarkup(scenario_keyboard, resize_keyboard=True)
-
         await update.message.reply_text(
-            "❗ Сначала выберите, что хотите создать:\n\n"
-            "📧 Email коллеге\n"
-            "💬 Сообщение в чат\n"
-            "📝 Документация\n"
-            "✉️ Официальное письмо\n"
-            "✏️ Аккуратно отредактировать",
-            reply_markup=reply_markup
+            "❗ Сначала выберите режим обработки:",
+            reply_markup=get_mode_keyboard()
         )
         return
 
@@ -666,7 +477,6 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         audio = AudioSegment.from_ogg(temp_ogg)
         audio.export(temp_wav, format="wav")
 
-        # Calculate audio duration
         audio_duration = len(audio) / 1000.0  # Convert to seconds
 
         logger.info(f"✅ Conversion successful! Duration: {audio_duration:.1f}s")
@@ -677,16 +487,14 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             os.remove(temp_ogg)
         return
 
-    await update.message.reply_text(f"🎤 Обрабатываю голосовое сообщение... (Стиль: {get_style_name(user_style)})")
+    await update.message.reply_text(f"🎤 Обрабатываю... ({get_style_name(user_style)})")
 
     try:
         raw_text = await transcribe_audio(temp_wav)
         refined_text = await refine_text(raw_text, style=user_style)
 
-        # Calculate processing time
         processing_time = time.time() - start_time
 
-        # Log usage
         log_usage(
             telegram_user_id=user_id,
             message_type="voice",
@@ -699,7 +507,6 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Произошла ошибка: {str(e)}")
     finally:
-        # Clean up temp files
         if os.path.exists(temp_ogg):
             os.remove(temp_ogg)
         if os.path.exists(temp_wav):
@@ -717,46 +524,31 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_menu_buttons(update, context)
         return
 
-    # Check if scenario selection
-    scenario_selected = await handle_scenario_selection(update, context)
-    if scenario_selected:
+    # Check if mode selection
+    mode_selected = await handle_mode_selection(update, context)
+    if mode_selected:
         return
 
-    # If no scenario selected, prompt user
+    # If no mode selected, prompt user
     if 'selected_scenario' not in context.user_data:
-        scenario_keyboard = [
-            [KeyboardButton("📧 Email коллеге"), KeyboardButton("💬 Сообщение в чат")],
-            [KeyboardButton("📝 Документация"), KeyboardButton("✉️ Официальное письмо")],
-            [KeyboardButton("✏️ Аккуратно отредактировать")],
-        ]
-        reply_markup = ReplyKeyboardMarkup(scenario_keyboard, resize_keyboard=True)
-
         await update.message.reply_text(
-            "❗ Сначала выберите, что хотите создать:\n\n"
-            "📧 Email коллеге\n"
-            "💬 Сообщение в чат\n"
-            "📝 Документация\n"
-            "✉️ Официальное письмо\n"
-            "✏️ Аккуратно отредактировать",
-            reply_markup=reply_markup
+            "❗ Сначала выберите режим обработки:",
+            reply_markup=get_mode_keyboard()
         )
         return
 
     raw_text = text
     start_time = time.time()
 
-    # Get selected scenario from context (not database)
     user_style = context.user_data.get('selected_scenario', get_user_style(user_id))
 
-    await update.message.reply_text(f"✍️ Редактирую текст... (Стиль: {get_style_name(user_style)})")
+    await update.message.reply_text(f"✍️ Обрабатываю... ({get_style_name(user_style)})")
 
     try:
         refined_text = await refine_text(raw_text, style=user_style)
 
-        # Calculate processing time
         processing_time = time.time() - start_time
 
-        # Log usage
         log_usage(
             telegram_user_id=user_id,
             message_type="text",
@@ -784,7 +576,6 @@ def main():
     if not ASSEMBLYAI_API_KEY:
         raise ValueError("ASSEMBLYAI_API_KEY environment variable not set")
 
-    # Create application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Add command handlers
@@ -792,15 +583,13 @@ def main():
     application.add_handler(CommandHandler("enter_code", enter_code_command))
     application.add_handler(CommandHandler("admin_stats", admin_stats_command))
     application.add_handler(CommandHandler("seed_codes", seed_codes_command))
-    application.add_handler(CommandHandler("style", style_command))
-    application.add_handler(CommandHandler("set_style", set_style_command))
 
     # Add message handlers
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     # Start bot
-    logger.info("🚀 Starting bot v2.0 with authentication...")
+    logger.info("🚀 Starting HelpWriter bot v2.1...")
     logger.info("✅ Bot is running. Press Ctrl+C to stop.")
     application.run_polling(allowed_updates=["message"])
 
