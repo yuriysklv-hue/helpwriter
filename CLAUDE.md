@@ -139,19 +139,28 @@ python-dotenv
 
 ## Деплой обновлений на сервер
 
+Деплой через GitHub (ветка `claude/bot-monetization-features-SPLUX`):
+
 ```bash
-# Скопировать изменённые файлы
-scp bot_v2.py root@80.249.148.167:~/voice_bot/voice_assistant_bot/
-scp style_prompts.py root@80.249.148.167:~/voice_bot/voice_assistant_bot/
-scp database.py root@80.249.148.167:~/voice_bot/voice_assistant_bot/
+# Подключиться к серверу
+ssh root@80.249.148.167
+
+# Перейти в папку бота и обновить файлы
+cd ~/voice_bot/voice_assistant_bot
+git fetch origin
+git show origin/claude/bot-monetization-features-SPLUX:bot_v2.py > bot_v2.py
+git show origin/claude/bot-monetization-features-SPLUX:style_prompts.py > style_prompts.py
+git show origin/claude/bot-monetization-features-SPLUX:CLAUDE.md > CLAUDE.md
 
 # Перезапустить бота
-ssh root@80.249.148.167 "tmux send-keys -t bot C-c && sleep 2 && tmux send-keys -t bot 'cd ~/voice_bot/voice_assistant_bot && python bot_v2.py' Enter"
+tmux send-keys -t bot C-c Enter
+sleep 2
+tmux send-keys -t bot 'source venv/bin/activate && python bot_v2.py' Enter
 ```
 
-Либо напрямую через git на сервере:
+Если `origin` ещё не указывает на GitHub (один раз):
 ```bash
-git show github/claude/<branch>:bot_v2.py > bot_v2.py
+git remote set-url origin https://github.com/yuriysklv-hue/helpwriter.git
 ```
 
 ---
