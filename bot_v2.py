@@ -171,6 +171,7 @@ def get_mode_keyboard():
     keyboard = [
         [KeyboardButton("✏️ Аккуратная транскрибация")],
         [KeyboardButton("📋 Структура и план")],
+        [KeyboardButton("💡 Углы для материала")],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -193,6 +194,7 @@ def get_main_keyboard(is_admin=False):
 MODE_BUTTON_MAP = {
     "✏️ Аккуратная транскрибация": "transcription",
     "📋 Структура и план": "structure",
+    "💡 Углы для материала": "ideas",
 }
 
 
@@ -214,6 +216,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **Режимы:**
 ✏️ Аккуратная транскрибация — диктуйте, я аккуратно отредактирую
 📋 Структура и план — диктуйте мысли, я верну план материала
+💡 Углы для материала — набросайте идею, я предложу углы для раскрытия
 
 🎯 **Выберите режим:**"""
 
@@ -436,13 +439,20 @@ async def handle_mode_selection(update: Update, context: ContextTypes.DEFAULT_TY
 
 🎤 Голосовое — транскрибирую и отредактирую
 📝 Текст — сразу отредактирую"""
-    else:
+    elif selected_mode == "structure":
         confirmation = f"""✅ Режим: {text}
 
 Надиктуйте или напишите ваши мысли — я верну структурированный план материала.
 
 🎤 Голосовое — транскрибирую и создам план
 📝 Текст — сразу создам план"""
+    else:
+        confirmation = f"""✅ Режим: {text}
+
+Набросайте идею — факт, новость, наблюдение, мысль. Я предложу 4-6 углов под которыми это можно раскрыть.
+
+🎤 Голосовое — транскрибирую и разберу углы
+📝 Текст — сразу разберу углы"""
 
     await update.message.reply_text(confirmation, parse_mode="Markdown")
     return True
