@@ -428,7 +428,7 @@ STYLE_PROMPTS = {
 STYLE_NAMES = {
     "transcription": "✏️ Аккуратная транскрибация",
     "structure": "📋 Структура и план",
-    "ideas": "💡 Углы для материала"
+    "ideas": "💡 Идеи"
 }
 
 
