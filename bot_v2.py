@@ -192,17 +192,15 @@ def get_mode_keyboard():
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
-def get_main_keyboard(is_admin=False):
-    """Get main menu keyboard based on user role."""
-    if is_admin:
-        keyboard = [
-            [KeyboardButton("📊 Статистика")],
-            [KeyboardButton("❓ Справка")],
-        ]
-    else:
-        keyboard = []
-
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True) if keyboard else None
+def get_admin_keyboard():
+    """Get keyboard for admin: mode buttons + stats."""
+    keyboard = [
+        [KeyboardButton("✏️ Аккуратная транскрибация")],
+        [KeyboardButton("📋 Структура и план")],
+        [KeyboardButton("💡 Идеи")],
+        [KeyboardButton("📊 Статистика")],
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
 # Map button text to mode keys
@@ -223,14 +221,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = (user_id == ADMIN_ID)
 
     if is_admin:
-        reply_markup = get_main_keyboard(is_admin=True)
-        welcome_message = (
-            "👑 *Привет, Admin!*\n\n"
-            "Используй кнопки ниже или команды:\n"
-            "/admin\\_stats — статистика и выручка\n"
-            "/subscription — статус подписки"
+        reply_markup = get_admin_keyboard()
+        await update.message.reply_text(
+            "👑 *Привет, Admin!* Выбери режим или открой статистику:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
         )
-        await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode="Markdown")
         return
 
     reply_markup = get_mode_keyboard()
@@ -438,9 +434,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     # Check if admin button (before auth check — admin always has access)
-    admin_buttons = ["📊 Статистика", "❓ Справка"]
-    if user_id == ADMIN_ID and text in admin_buttons:
-        await handle_menu_buttons(update, context)
+    if user_id == ADMIN_ID and text == "📊 Статистика":
+        await admin_stats_command(update, context)
         return
 
     # Check if mode selection (before auth — let user pick mode, auth checked when processing)
