@@ -226,9 +226,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = get_main_keyboard(is_admin=True)
         welcome_message = (
             "👑 *Привет, Admin!*\n\n"
-            "Используй кнопки ниже для управления ботом или команды:\n"
-            "/admin\\_stats — статистика\n"
-            "/seed\\_codes — управление кодами\n"
+            "Используй кнопки ниже или команды:\n"
+            "/admin\\_stats — статистика и выручка\n"
             "/subscription — статус подписки"
         )
         await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode="Markdown")
@@ -265,34 +264,31 @@ async def admin_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     stars_rub = round(sub_stats["stars_last_30d"] * 0.02 * 90 * 0.7)  # after Telegram 30% cut
 
     message = (
-        "📊 **Статистика использования бота**\n\n"
-        f"⭐ *Подписки:* {sub_stats['active_subscriptions']} активных\n"
-        f"💰 *Выручка за 30 дней:* {sub_stats['stars_last_30d']} звёзд (~{stars_rub} ₽ после комиссии)\n\n"
+        "*📊 Статистика бота*\n\n"
+        f"⭐ Подписки: *{sub_stats['active_subscriptions']}* активных\n"
+        f"💰 Выручка за 30 дней: *{sub_stats['stars_last_30d']} звёзд* (~{stars_rub} ₽ после комиссии)\n\n"
         "— — —\n\n"
+        "*Активность пользователей:*\n\n"
     )
 
     stats = get_admin_stats()
 
-    for stat in stats:
-        message += f"🔑 Код: `{stat['code']}`\n"
-        message += f"   👤 User ID: {stat['user_id'] if stat['user_id'] else 'Не активирован'}\n"
-        message += f"   📨 Всего сообщений: {stat['total_messages']}\n"
-        message += f"   🎤 Голосовых: {stat['voice_messages']}\n"
-        message += f"   📝 Текстовых: {stat['text_messages']}\n"
+    if not stats:
+        message += "_Нет данных об использовании_"
+    else:
+        for stat in stats:
+            message += f"👤 `{stat['user_id']}`\n"
+            message += f"   📨 Сообщений: {stat['total_messages']} "
+            message += f"(🎤 {stat['voice_messages']} / 📝 {stat['text_messages']})\n"
 
-        if stat['total_audio_duration']:
-            minutes = stat['total_audio_duration'] / 60
-            message += f"   ⏱️ Аудио: {minutes:.1f} мин\n"
+            if stat['total_audio_duration']:
+                minutes = stat['total_audio_duration'] / 60
+                message += f"   ⏱️ Аудио: {minutes:.1f} мин\n"
 
-        if stat['total_text_characters']:
-            message += f"   📊 Текст: {stat['total_text_characters']:,} символов\n"
+            if stat['last_usage']:
+                message += f"   📅 Последнее: {stat['last_usage'][:10]}\n"
 
-        if stat['first_usage']:
-            message += f"   📅 Первое использование: {stat['first_usage']}\n"
-        if stat['last_usage']:
-            message += f"   📅 Последнее: {stat['last_usage']}\n"
-
-        message += "\n"
+            message += "\n"
 
     await update.message.reply_text(message, parse_mode="Markdown")
 

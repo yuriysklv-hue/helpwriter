@@ -256,19 +256,17 @@ def log_usage(
 
 def get_admin_stats() -> List[Dict]:
     """
-    Get comprehensive statistics for admin.
+    Get usage statistics per user from usage_logs.
 
     Returns:
-        List of dicts with stats per access code
+        List of dicts with stats per telegram_user_id
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
     cursor.execute("""
         SELECT
-            ac.code,
-            ac.telegram_user_id,
-            ac.assigned_at,
+            ul.telegram_user_id,
             COUNT(ul.id) as total_messages,
             SUM(CASE WHEN ul.message_type = 'voice' THEN 1 ELSE 0 END) as voice_messages,
             SUM(CASE WHEN ul.message_type = 'text' THEN 1 ELSE 0 END) as text_messages,
@@ -276,10 +274,9 @@ def get_admin_stats() -> List[Dict]:
             SUM(ul.text_characters) as total_text_characters,
             MIN(ul.timestamp) as first_usage,
             MAX(ul.timestamp) as last_usage
-        FROM access_codes ac
-        LEFT JOIN usage_logs ul ON ac.id = ul.access_code_id
-        GROUP BY ac.code
-        ORDER BY ac.created_at DESC
+        FROM usage_logs ul
+        GROUP BY ul.telegram_user_id
+        ORDER BY last_usage DESC
     """)
 
     rows = cursor.fetchall()
@@ -288,16 +285,14 @@ def get_admin_stats() -> List[Dict]:
     stats = []
     for row in rows:
         stats.append({
-            "code": row[0],
-            "user_id": row[1],
-            "assigned_at": row[2],
-            "total_messages": row[3] or 0,
-            "voice_messages": row[4] or 0,
-            "text_messages": row[5] or 0,
-            "total_audio_duration": row[6] or 0.0,
-            "total_text_characters": row[7] or 0,
-            "first_usage": row[8],
-            "last_usage": row[9]
+            "user_id": row[0],
+            "total_messages": row[1] or 0,
+            "voice_messages": row[2] or 0,
+            "text_messages": row[3] or 0,
+            "total_audio_duration": row[4] or 0.0,
+            "total_text_characters": row[5] or 0,
+            "first_usage": row[6],
+            "last_usage": row[7],
         })
 
     return stats
