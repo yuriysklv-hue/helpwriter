@@ -13,12 +13,15 @@ import os
 import logging
 import asyncio
 import time
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, LabeledPrice, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, PreCheckoutQueryHandler, filters, ContextTypes
 from openai import OpenAI
 import assemblyai as aai
 from pydub import AudioSegment
-from database import check_user_access, assign_code_to_user, log_usage, get_admin_stats, add_access_code, get_all_access_codes, get_user_style, set_user_style
+from database import (check_user_access, assign_code_to_user, log_usage, get_admin_stats,
+                      add_access_code, get_all_access_codes, get_user_style, set_user_style,
+                      get_active_subscription, create_subscription, get_expiring_subscriptions,
+                      deactivate_expired_subscriptions, get_subscription_stats)
 from style_prompts import get_style_prompt, get_style_name, get_style_description, get_all_styles, STYLE_NAMES, STYLE_PROMPTS
 
 # =============================================================================
@@ -72,32 +75,51 @@ except Exception as e:
 # AUTHENTICATION MIDDLEWARE
 # =============================================================================
 
+SUBSCRIPTION_PRICE_STARS = 150  # 1 month
+SUBSCRIPTION_DAYS = 30
+
+
 async def require_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """
-    Check if user is authenticated.
-    Admin (ADMIN_ID) has automatic access.
-    Regular users need an access code.
-    Returns True if user has access, False otherwise.
+    Check if user has access.
+    Priority: admin → manual code → active subscription → paywall.
     """
     user_id = update.effective_user.id
 
-    # Admin has automatic access
     if user_id == ADMIN_ID:
         return True
 
-    # Regular users need access code
+    # Manual access code (legacy, non-auto codes)
     access_code = check_user_access(user_id)
+    if access_code and not access_code.startswith("auto_"):
+        return True
 
-    if access_code is None:
-        await update.message.reply_text(
-            "🔒 Бот требует код доступа.\n\n"
-            "Используйте команду:\n"
-            "/enter_code <ваш_код>\n\n"
-            "Пример: /enter_code ritathebest"
-        )
-        return False
+    # Paid subscription
+    deactivate_expired_subscriptions()
+    if get_active_subscription(user_id):
+        return True
 
-    return True
+    # No access — show paywall
+    await update.message.reply_text(
+        "⭐ *Для использования бота нужна подписка*\n\n"
+        "Стоимость: *150 звёзд / месяц* (~200 ₽)\n\n"
+        "Что входит:\n"
+        "• Транскрибация голоса\n"
+        "• Структурирование текста\n"
+        "• Развитие идей\n\n"
+        "Нажмите кнопку ниже, чтобы оплатить:",
+        parse_mode="Markdown"
+    )
+    await context.bot.send_invoice(
+        chat_id=user_id,
+        title="Подписка HelpWriter — 1 месяц",
+        description="30 дней доступа ко всем режимам обработки текста",
+        payload=f"subscription_30d_{user_id}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice("1 месяц", SUBSCRIPTION_PRICE_STARS)],
+    )
+    return False
 
 
 # =============================================================================
@@ -270,9 +292,17 @@ async def admin_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("❌ У вас нет прав для этой команды.")
         return
 
-    stats = get_admin_stats()
+    sub_stats = get_subscription_stats()
+    stars_rub = round(sub_stats["stars_last_30d"] * 0.02 * 90 * 0.7)  # after Telegram 30% cut
 
-    message = "📊 **Статистика использования бота**\n\n"
+    message = (
+        "📊 **Статистика использования бота**\n\n"
+        f"⭐ *Подписки:* {sub_stats['active_subscriptions']} активных\n"
+        f"💰 *Выручка за 30 дней:* {sub_stats['stars_last_30d']} звёзд (~{stars_rub} ₽ после комиссии)\n\n"
+        "— — —\n\n"
+    )
+
+    stats = get_admin_stats()
 
     for stat in stats:
         message += f"🔑 Код: `{stat['code']}`\n"
@@ -460,6 +490,9 @@ async def handle_mode_selection(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming voice messages."""
+    if not await require_auth(update, context):
+        return
+
     user_id = update.effective_user.id
     start_time = time.time()
 
@@ -528,15 +561,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
 
-    # Check if admin button
+    # Check if admin button (before auth check — admin always has access)
     admin_buttons = ["📊 Статистика", "📋 Коды", "➕ Добавить коды", "❓ Справка"]
     if user_id == ADMIN_ID and text in admin_buttons:
         await handle_menu_buttons(update, context)
         return
 
-    # Check if mode selection
+    # Check if mode selection (before auth — let user pick mode, auth checked when processing)
     mode_selected = await handle_mode_selection(update, context)
     if mode_selected:
+        return
+
+    # Auth check before actual processing
+    if not await require_auth(update, context):
         return
 
     # If no mode selected, prompt user
@@ -572,6 +609,103 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =============================================================================
+# PAYMENT HANDLERS
+# =============================================================================
+
+async def handle_precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Confirm pre-checkout — required by Telegram before charging."""
+    await update.pre_checkout_query.answer(ok=True)
+
+
+async def handle_successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle successful Stars payment — create subscription."""
+    user_id = update.effective_user.id
+    payment = update.message.successful_payment
+
+    create_subscription(
+        telegram_user_id=user_id,
+        payment_id=payment.telegram_payment_charge_id,
+        stars_amount=payment.total_amount,
+        period_days=SUBSCRIPTION_DAYS,
+    )
+
+    await update.message.reply_text(
+        "✅ *Оплата прошла успешно!*\n\n"
+        f"Подписка активна на {SUBSCRIPTION_DAYS} дней.\n\n"
+        "Выберите режим и отправляйте голосовые или текст:",
+        parse_mode="Markdown",
+        reply_markup=get_mode_keyboard()
+    )
+
+
+async def subscription_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /subscription command — show subscription status."""
+    user_id = update.effective_user.id
+
+    if user_id == ADMIN_ID:
+        await update.message.reply_text("👑 Вы администратор — доступ без подписки.")
+        return
+
+    code = check_user_access(user_id)
+    if code and not code.startswith("auto_"):
+        await update.message.reply_text(f"🔑 У вас ручной код доступа: `{code}`", parse_mode="Markdown")
+        return
+
+    sub = get_active_subscription(user_id)
+    if sub:
+        expires = sub["expires_at"][:10]  # YYYY-MM-DD
+        await update.message.reply_text(
+            f"✅ *Подписка активна*\n\n"
+            f"Истекает: *{expires}*\n\n"
+            "Чтобы продлить заранее, нажмите кнопку:",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("Продлить — 150 ⭐", callback_data="renew_subscription")
+            ]])
+        )
+    else:
+        await update.message.reply_text("❌ Подписка не активна.")
+        await context.bot.send_invoice(
+            chat_id=user_id,
+            title="Подписка HelpWriter — 1 месяц",
+            description="30 дней доступа ко всем режимам обработки текста",
+            payload=f"subscription_30d_{user_id}",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice("1 месяц", SUBSCRIPTION_PRICE_STARS)],
+        )
+
+
+async def send_expiry_reminders(context: ContextTypes.DEFAULT_TYPE):
+    """Daily job: remind users whose subscription expires in 3 days."""
+    deactivate_expired_subscriptions()
+    expiring = get_expiring_subscriptions(days_before=3)
+    for entry in expiring:
+        user_id = entry["user_id"]
+        expires = entry["expires_at"][:10]
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=(
+                    f"⏳ *Подписка истекает {expires}*\n\n"
+                    "Продлите, чтобы не потерять доступ:"
+                ),
+                parse_mode="Markdown"
+            )
+            await context.bot.send_invoice(
+                chat_id=user_id,
+                title="Продление HelpWriter — 1 месяц",
+                description="30 дней доступа ко всем режимам обработки текста",
+                payload=f"subscription_30d_{user_id}",
+                provider_token="",
+                currency="XTR",
+                prices=[LabeledPrice("1 месяц", SUBSCRIPTION_PRICE_STARS)],
+            )
+        except Exception as e:
+            logger.warning(f"Could not send reminder to {user_id}: {e}")
+
+
+# =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================
 
@@ -593,15 +727,31 @@ def main():
     application.add_handler(CommandHandler("enter_code", enter_code_command))
     application.add_handler(CommandHandler("admin_stats", admin_stats_command))
     application.add_handler(CommandHandler("seed_codes", seed_codes_command))
+    application.add_handler(CommandHandler("subscription", subscription_command))
+
+    # Payment handlers
+    application.add_handler(PreCheckoutQueryHandler(handle_precheckout))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, handle_successful_payment))
 
     # Add message handlers
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
+    # Daily reminder job (requires python-telegram-bot[job-queue])
+    if application.job_queue:
+        import datetime
+        application.job_queue.run_daily(
+            send_expiry_reminders,
+            time=datetime.time(hour=10, minute=0),
+        )
+        logger.info("✅ Expiry reminder job scheduled at 10:00 daily")
+    else:
+        logger.warning("⚠️ job_queue not available — expiry reminders disabled. Install python-telegram-bot[job-queue]")
+
     # Start bot
-    logger.info("🚀 Starting HelpWriter bot v2.1...")
+    logger.info("🚀 Starting HelpWriter bot v2.2...")
     logger.info("✅ Bot is running. Press Ctrl+C to stop.")
-    application.run_polling(allowed_updates=["message"])
+    application.run_polling(allowed_updates=["message", "pre_checkout_query"])
 
 
 if __name__ == "__main__":

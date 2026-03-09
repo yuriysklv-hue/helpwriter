@@ -5,7 +5,7 @@ Handles access codes, user authentication, and usage analytics
 
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import logging
 
@@ -42,6 +42,23 @@ def init_database():
         cursor.execute("ALTER TABLE access_codes ADD COLUMN preferred_style TEXT DEFAULT 'transcription'")
         conn.commit()
         logger.info("✅ Migration completed")
+
+    # Create subscriptions table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_user_id INTEGER NOT NULL,
+            stars_payment_id TEXT NOT NULL,
+            stars_amount INTEGER NOT NULL,
+            period_days INTEGER NOT NULL,
+            started_at TIMESTAMP NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sub_user ON subscriptions(telegram_user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sub_expires ON subscriptions(expires_at)")
 
     # Create usage_logs table
     cursor.execute("""
@@ -217,24 +234,13 @@ def log_usage(
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Get access code ID
+    # Get access code ID (may be None for subscription-only users)
     cursor.execute(
         "SELECT id FROM access_codes WHERE telegram_user_id = ?",
         (telegram_user_id,)
     )
     result = cursor.fetchone()
-
-    # If user doesn't exist, create automatically (open access)
-    if result is None:
-        conn.close()
-        logger.info(f"📝 New user {telegram_user_id} - creating auto access code")
-        access_code_id = create_auto_access_code(telegram_user_id)
-
-        # Reopen connection for logging
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-    else:
-        access_code_id = result[0]
+    access_code_id = result[0] if result else None
 
     # Insert usage log
     cursor.execute("""
@@ -361,6 +367,105 @@ def set_user_style(telegram_user_id: int, style: str) -> bool:
     except Exception as e:
         logger.error(f"❌ Error setting user style: {e}")
         return False
+
+
+def get_active_subscription(telegram_user_id: int) -> Optional[Dict]:
+    """Return active subscription or None."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, stars_amount, period_days, started_at, expires_at
+        FROM subscriptions
+        WHERE telegram_user_id = ? AND is_active = 1 AND expires_at > CURRENT_TIMESTAMP
+        ORDER BY expires_at DESC
+        LIMIT 1
+    """, (telegram_user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    if result:
+        return {
+            "id": result[0],
+            "stars_amount": result[1],
+            "period_days": result[2],
+            "started_at": result[3],
+            "expires_at": result[4],
+        }
+    return None
+
+
+def create_subscription(telegram_user_id: int, payment_id: str, stars_amount: int, period_days: int) -> int:
+    """Create subscription record, return its ID."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now = datetime.now()
+    expires_at = now + timedelta(days=period_days)
+    cursor.execute("""
+        INSERT INTO subscriptions
+        (telegram_user_id, stars_payment_id, stars_amount, period_days, started_at, expires_at, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+    """, (telegram_user_id, payment_id, stars_amount, period_days, now.isoformat(), expires_at.isoformat()))
+    sub_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    logger.info(f"✅ Subscription created for user {telegram_user_id}, expires {expires_at.date()}")
+    return sub_id
+
+
+def get_expiring_subscriptions(days_before: int = 3) -> List[Dict]:
+    """Return subscriptions expiring within N days (for reminders)."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now = datetime.now()
+    threshold = now + timedelta(days=days_before)
+    cursor.execute("""
+        SELECT telegram_user_id, expires_at
+        FROM subscriptions
+        WHERE is_active = 1
+          AND expires_at > CURRENT_TIMESTAMP
+          AND expires_at <= ?
+    """, (threshold.isoformat(),))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"user_id": r[0], "expires_at": r[1]} for r in rows]
+
+
+def deactivate_expired_subscriptions() -> int:
+    """Deactivate expired subscriptions. Returns number of affected rows."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE subscriptions SET is_active = 0
+        WHERE expires_at <= CURRENT_TIMESTAMP AND is_active = 1
+    """)
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    if affected > 0:
+        logger.info(f"✅ Deactivated {affected} expired subscriptions")
+    return affected
+
+
+def get_subscription_stats() -> Dict:
+    """Return subscription stats for admin."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*), SUM(stars_amount)
+        FROM subscriptions
+        WHERE is_active = 1 AND expires_at > CURRENT_TIMESTAMP
+    """)
+    active_row = cursor.fetchone()
+    cursor.execute("""
+        SELECT SUM(stars_amount)
+        FROM subscriptions
+        WHERE started_at >= datetime('now', '-30 days')
+    """)
+    monthly_row = cursor.fetchone()
+    conn.close()
+    return {
+        "active_subscriptions": active_row[0] or 0,
+        "stars_last_30d": monthly_row[0] or 0,
+    }
 
 
 # Initialize database on import
