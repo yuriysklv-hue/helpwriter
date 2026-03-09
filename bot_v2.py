@@ -18,8 +18,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, PreCheckou
 from openai import OpenAI
 import assemblyai as aai
 from pydub import AudioSegment
-from database import (check_user_access, assign_code_to_user, log_usage, get_admin_stats,
-                      add_access_code, get_all_access_codes, get_user_style, set_user_style,
+from database import (log_usage, get_admin_stats, get_user_style,
                       get_active_subscription, create_subscription, get_expiring_subscriptions,
                       deactivate_expired_subscriptions, get_subscription_stats)
 from style_prompts import get_style_prompt, get_style_name, get_style_description, get_all_styles, STYLE_NAMES, STYLE_PROMPTS
@@ -87,11 +86,6 @@ async def require_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bo
     user_id = update.effective_user.id
 
     if user_id == ADMIN_ID:
-        return True
-
-    # Manual access code (legacy, non-auto codes)
-    access_code = check_user_access(user_id)
-    if access_code and not access_code.startswith("auto_"):
         return True
 
     # Paid subscription
@@ -202,8 +196,7 @@ def get_main_keyboard(is_admin=False):
     """Get main menu keyboard based on user role."""
     if is_admin:
         keyboard = [
-            [KeyboardButton("📊 Статистика"), KeyboardButton("📋 Коды")],
-            [KeyboardButton("➕ Добавить коды")],
+            [KeyboardButton("📊 Статистика")],
             [KeyboardButton("❓ Справка")],
         ]
     else:
@@ -259,44 +252,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode="Markdown")
 
 
-async def enter_code_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /enter_code command."""
-    user_id = update.effective_user.id
-
-    # Check if already authenticated with a real (non-auto) code
-    existing_code = check_user_access(user_id)
-    if existing_code and not existing_code.startswith("auto_"):
-        current_mode = get_user_style(user_id)
-        await update.message.reply_text(
-            f"✅ У вас уже есть доступ!\n\n"
-            f"Ваш код: {existing_code}\n\n"
-            f"Текущий режим: {get_style_name(current_mode)}\n\n"
-            f"Бот готов к работе.",
-            reply_markup=get_mode_keyboard()
-        )
-        return
-
-    # Get code from arguments
-    if not context.args or len(context.args) == 0:
-        await update.message.reply_text(
-            "❌ Укажите код доступа.\n\n"
-            "Пример: /enter_code ritathebest"
-        )
-        return
-
-    code = context.args[0].strip()
-
-    # Assign code to user
-    success, message = assign_code_to_user(code, user_id)
-
-    if success:
-        await update.message.reply_text(
-            message + "\n\nВыберите режим обработки текста:",
-            reply_markup=get_mode_keyboard()
-        )
-    else:
-        await update.message.reply_text(message)
-
 
 async def admin_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /admin_stats command - only for admin."""
@@ -342,39 +297,6 @@ async def admin_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(message, parse_mode="Markdown")
 
 
-async def seed_codes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Seed initial access codes - only for admin."""
-    user_id = update.effective_user.id
-
-    if user_id != ADMIN_ID:
-        await update.message.reply_text("❌ У вас нет прав для этой команды.")
-        return
-
-    if not context.args or len(context.args) == 0:
-        existing_codes = get_all_access_codes()
-        await update.message.reply_text(
-            f"📋 Существующие коды:\n\n" + "\n".join(existing_codes) +
-            "\n\nИспользование: /seed_codes код1 код2 код3"
-        )
-        return
-
-    added = []
-    already_exists = []
-
-    for code in context.args:
-        if add_access_code(code):
-            added.append(code)
-        else:
-            already_exists.append(code)
-
-    message = "📝 Результат:\n\n"
-    if added:
-        message += f"✅ Добавлены: {', '.join(added)}\n"
-    if already_exists:
-        message += f"⚠️ Уже существуют: {', '.join(already_exists)}\n"
-
-    await update.message.reply_text(message)
-
 
 async def handle_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle admin menu button presses."""
@@ -388,76 +310,20 @@ async def handle_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text == "📊 Статистика":
         await admin_stats_command(update, context)
         return True
-    elif text == "📋 Коды":
-        await list_codes_command(update, context)
-        return True
-    elif text == "➕ Добавить коды":
-        await update.message.reply_text(
-            "➕ *Добавление кодов*\n\n"
-            "Отправьте коды для добавления в формате:\n"
-            "`/seed_codes код1 код2 код3`",
-            parse_mode="Markdown"
-        )
-        return True
     elif text == "❓ Справка":
-        help_text = """❓ *Админ-справка*
-
-*Доступные команды:*
-
-📊 /admin\\_stats - Полная статистика по всем кодам
-
-📋 /seed\\_codes - Управление кодами доступа
-   • Без аргументов: показать существующие коды
-   • С аргументами: `/seed_codes код1 код2 код3`
-
-*Через CLI на сервере:*
-```bash
-python manage_codes.py add код1 код2
-python manage_codes.py list
-python manage_codes.py stats
-python manage_codes.py remove код
-```"""
+        help_text = (
+            "❓ *Админ-справка*\n\n"
+            "*Доступные команды:*\n\n"
+            "📊 /admin\\_stats — статистика и выручка\n"
+            "🔔 /subscription — статус подписки\n\n"
+            "*На сервере:*\n"
+            "`tmux attach -t bot` — логи бота"
+        )
         await update.message.reply_text(help_text, parse_mode="Markdown")
         return True
 
     return False
 
-
-async def list_codes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show list of all access codes."""
-    user_id = update.effective_user.id
-
-    if user_id != ADMIN_ID:
-        await update.message.reply_text("❌ У вас нет прав для этой команды.")
-        return
-
-    import sqlite3
-    conn = sqlite3.connect("bot_database.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT code, telegram_user_id, assigned_at, is_active, preferred_style
-        FROM access_codes
-        ORDER BY created_at DESC
-    """)
-    rows = cursor.fetchall()
-    conn.close()
-
-    message = "📋 *Список кодов доступа*\n\n"
-
-    for row in rows:
-        code, user_id_code, assigned_at, is_active, preferred_style = row
-        status = "✅ Активен" if is_active else "❌ Неактивен"
-        user_info = f"User ID: `{user_id_code}`" if user_id_code else "🔓 Не назначен"
-
-        message += f"🔑 *{code}*\n"
-        message += f"   {status}\n"
-        message += f"   {user_info}\n"
-        message += f"   Режим: {get_style_name(preferred_style)}\n"
-        if assigned_at:
-            message += f"   📅 {assigned_at}\n"
-        message += "\n"
-
-    await update.message.reply_text(message, parse_mode="Markdown")
 
 
 async def handle_mode_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -576,7 +442,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     # Check if admin button (before auth check — admin always has access)
-    admin_buttons = ["📊 Статистика", "📋 Коды", "➕ Добавить коды", "❓ Справка"]
+    admin_buttons = ["📊 Статистика", "❓ Справка"]
     if user_id == ADMIN_ID and text in admin_buttons:
         await handle_menu_buttons(update, context)
         return
@@ -660,11 +526,6 @@ async def subscription_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("👑 Вы администратор — доступ без подписки.")
         return
 
-    code = check_user_access(user_id)
-    if code and not code.startswith("auto_"):
-        await update.message.reply_text(f"🔑 У вас ручной код доступа: `{code}`", parse_mode="Markdown")
-        return
-
     sub = get_active_subscription(user_id)
     if sub:
         expires = sub["expires_at"][:10]  # YYYY-MM-DD
@@ -744,9 +605,7 @@ def main():
 
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("enter_code", enter_code_command))
     application.add_handler(CommandHandler("admin_stats", admin_stats_command))
-    application.add_handler(CommandHandler("seed_codes", seed_codes_command))
     application.add_handler(CommandHandler("subscription", subscription_command))
 
     # Payment handlers
