@@ -13,7 +13,7 @@ import os
 import logging
 import asyncio
 import time
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, LabeledPrice, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, LabeledPrice
 from telegram.ext import Application, CommandHandler, MessageHandler, PreCheckoutQueryHandler, filters, ContextTypes
 from openai import OpenAI
 import assemblyai as aai
@@ -226,21 +226,35 @@ MODE_BUTTON_MAP = {
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command - show mode selection keyboard."""
-    reply_markup = get_mode_keyboard()
+    user_id = update.effective_user.id
+    is_admin = (user_id == ADMIN_ID)
 
+    if is_admin:
+        reply_markup = get_main_keyboard(is_admin=True)
+        welcome_message = (
+            "👑 *Привет, Admin!*\n\n"
+            "Используй кнопки ниже для управления ботом или команды:\n"
+            "/admin\\_stats — статистика\n"
+            "/seed\\_codes — управление кодами\n"
+            "/subscription — статус подписки"
+        )
+        await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode="Markdown")
+        return
+
+    reply_markup = get_mode_keyboard()
     welcome_message = """👋 Привет! Я — HelpWriter, помощник для написания текстов.
 
-**Как это работает:**
+*Как это работает:*
 1. Выберите режим обработки
 2. Отправьте голосовое или текст
 3. Получите готовый результат
 
-**Режимы:**
+*Режимы:*
 ✏️ Аккуратная транскрибация — диктуйте, я аккуратно отредактирую
 📋 Структура и план — диктуйте мысли, я верну план материала
 💡 Идеи — набросайте идею, я предложу углы для раскрытия
 
-🎯 **Выберите режим:**"""
+🎯 *Выберите режим:*"""
 
     await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -249,9 +263,9 @@ async def enter_code_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Handle /enter_code command."""
     user_id = update.effective_user.id
 
-    # Check if already authenticated
+    # Check if already authenticated with a real (non-auto) code
     existing_code = check_user_access(user_id)
-    if existing_code:
+    if existing_code and not existing_code.startswith("auto_"):
         current_mode = get_user_style(user_id)
         await update.message.reply_text(
             f"✅ У вас уже есть доступ!\n\n"
@@ -657,11 +671,17 @@ async def subscription_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(
             f"✅ *Подписка активна*\n\n"
             f"Истекает: *{expires}*\n\n"
-            "Чтобы продлить заранее, нажмите кнопку:",
+            "Чтобы продлить заранее — оплатите ниже, дни добавятся к текущей подписке:",
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Продлить — 150 ⭐", callback_data="renew_subscription")
-            ]])
+        )
+        await context.bot.send_invoice(
+            chat_id=user_id,
+            title="Продление HelpWriter — +1 месяц",
+            description=f"Добавит 30 дней к текущей подписке (истекает {expires})",
+            payload=f"subscription_renew_{user_id}",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice("1 месяц", SUBSCRIPTION_PRICE_STARS)],
         )
     else:
         await update.message.reply_text("❌ Подписка не активна.")

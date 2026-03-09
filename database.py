@@ -394,11 +394,21 @@ def get_active_subscription(telegram_user_id: int) -> Optional[Dict]:
 
 
 def create_subscription(telegram_user_id: int, payment_id: str, stars_amount: int, period_days: int) -> int:
-    """Create subscription record, return its ID."""
+    """Create subscription record. If active subscription exists, extends it. Returns record ID."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     now = datetime.now()
-    expires_at = now + timedelta(days=period_days)
+
+    # Check for existing active subscription to extend from its expiry, not from now
+    cursor.execute("""
+        SELECT expires_at FROM subscriptions
+        WHERE telegram_user_id = ? AND is_active = 1 AND expires_at > CURRENT_TIMESTAMP
+        ORDER BY expires_at DESC LIMIT 1
+    """, (telegram_user_id,))
+    row = cursor.fetchone()
+    base_date = datetime.fromisoformat(row[0]) if row else now
+    expires_at = base_date + timedelta(days=period_days)
+
     cursor.execute("""
         INSERT INTO subscriptions
         (telegram_user_id, stars_payment_id, stars_amount, period_days, started_at, expires_at, is_active)
