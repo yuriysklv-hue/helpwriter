@@ -1,0 +1,20 @@
+.editor-page {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.editor-main {
+  flex: 1;
+  overflow-y: auto;
+  background: white;
+}
+
+.editor-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #999;
+  font-size: 1rem;
+}
