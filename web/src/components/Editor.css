@@ -7,10 +7,51 @@
 .editor-toolbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  padding: 12px 24px;
+  padding: 8px 16px;
   border-bottom: 1px solid #e5e5e5;
   background: white;
+  flex-wrap: wrap;
+}
+
+.format-btns {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.fmt-btn {
+  background: none;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  color: #444;
+  transition: background 0.15s;
+}
+
+.fmt-btn:hover {
+  background: #f0f0f0;
+}
+
+.fmt-btn.active {
+  background: #e0e7ff;
+  color: #2563eb;
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 20px;
+  background: #e0e0e0;
+  margin: 0 4px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .save-btn {
