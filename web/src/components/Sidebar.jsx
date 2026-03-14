@@ -34,7 +34,7 @@ export default function Sidebar({ documents, activeId, onSelect, onLogout }) {
 }
 
 function stripHtml(html) {
-  return html.replace(/<[^>]+>/g, '')
+  return (html || '').replace(/<[^>]+>/g, '')
 }
 
 function formatDate(iso) {
