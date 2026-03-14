@@ -1,7 +1,7 @@
 # Voice Assistant Bot (HelpWriter) — Контекст для Claude
 
-**Версия:** 2.5
-**Обновлено:** 12 марта 2026
+**Версия:** 3.0
+**Обновлено:** 14 марта 2026
 
 ---
 
@@ -51,9 +51,9 @@ helpwriter/
 ├── bot_v2.py              # Основной код бота
 ├── database.py            # Работа с БД (SQLite)
 ├── style_prompts.py       # Промпты для режимов обработки
-├── manage_codes.py        # CLI для управления кодами доступа
 ├── bot_database.db        # База данных (WAL mode)
 ├── requirements.txt       # Зависимости
+├── nginx.conf             # Конфиг Nginx (статика + proxy к API)
 ├── .env                   # Переменные окружения (не коммитить!)
 ├── api/                   # FastAPI бэкенд
 │   ├── main.py            # FastAPI app, CORS, роуты
@@ -66,7 +66,27 @@ helpwriter/
 │       └── internal.py    # POST /internal/bot/save
 ├── migrations/
 │   └── 001_add_users_documents.sql
-└── web/                   # React + TipTap фронтенд (Этап 4, TODO)
+└── web/                   # React + TipTap фронтенд
+    ├── index.html
+    ├── vite.config.js
+    ├── package.json
+    ├── .env.example
+    └── src/
+        ├── main.jsx
+        ├── App.jsx
+        ├── index.css
+        ├── api/
+        │   └── client.js          # axios + JWT interceptors
+        ├── components/
+        │   ├── Editor.jsx         # TipTap редактор + тулбар
+        │   ├── Editor.css
+        │   ├── Sidebar.jsx        # Список документов
+        │   └── Sidebar.css
+        └── pages/
+            ├── Login.jsx          # Telegram Login Widget
+            ├── Login.css
+            ├── EditorPage.jsx     # Основная страница редактора
+            └── EditorPage.css
 ```
 
 ---
@@ -78,7 +98,6 @@ helpwriter/
 | `users` | Пользователи веб-редактора (telegram_id, имя, username) |
 | `documents` | Документы (user_id FK, content, mode, source, soft-delete) |
 | `subscriptions` | Платные подписки через Telegram Stars |
-| `access_codes` | Legacy коды доступа |
 | `usage_logs` | Логи использования для аналитики |
 
 ---
@@ -89,10 +108,10 @@ helpwriter/
 TELEGRAM_BOT_TOKEN="..."
 DEEPSEEK_API_KEY="..."
 ASSEMBLYAI_API_KEY="..."
-ADMIN_ID="..."            # Telegram user ID администратора
-WEB_URL="https://your-domain.com"  # URL веб-редактора (опционально)
-JWT_SECRET_KEY="..."      # Секрет для подписи JWT (сгенерировать случайный)
-INTERNAL_API_TOKEN="..."  # Токен для /internal/bot/save (опционально)
+ADMIN_ID="..."                     # Telegram user ID администратора
+WEB_URL="https://your-domain.com"  # URL веб-редактора
+JWT_SECRET_KEY="..."               # Секрет для подписи JWT (сгенерировать случайный)
+INTERNAL_API_TOKEN="..."           # Токен для /internal/bot/save
 ```
 
 ---
@@ -126,6 +145,39 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 
 ---
 
+## Веб-редактор
+
+### TipTap расширения
+Установлены в `web/package.json` (TipTap v3):
+- `@tiptap/starter-kit` — базовый набор (bold, italic, strike, code, headings, lists, blockquote, hr)
+- `@tiptap/extension-underline` — подчёркивание
+- `@tiptap/extension-text-align` — выравнивание (left / center / right / justify)
+- `@tiptap/extension-highlight` — выделение цветом (жёлтый маркер)
+- `@tiptap/extension-link` — ссылки (prompt для URL)
+- `@tiptap/extension-superscript` — верхний индекс
+- `@tiptap/extension-subscript` — нижний индекс
+
+### Тулбар (слева направо)
+Undo · Redo | Heading▾ (P/H1/H2/H3) · List▾ (bullet/numbered) · Outdent · Indent | **B** · *I* · ~~S~~ · `</>` · U̲ · Highlight · Link | x² · x₂ | Align L/C/R/J | Blockquote
+
+### Типографика (Notion-style)
+- `font-size: 16px`, `line-height: 1.6`
+- Абзацы: `margin: 0 0 0.3em` (без лишнего воздуха)
+- H1: 1.875rem / 700, H2: 1.375rem / 600, H3: 1.125rem / 600
+- Списки: `li { margin: 0.1em 0 }`, вложенные плотные
+- Inline code: моноширинный шрифт, красный цвет, серый фон
+- Highlight: жёлтый фон `#fff3a3`
+- Сохранение: Ctrl+S или кнопка
+
+### Сборка фронтенда
+```bash
+cd web
+npm install
+npm run build   # → dist/ (статика для Nginx)
+```
+
+---
+
 ## Команды бота
 
 | Команда | Описание |
@@ -134,6 +186,16 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 | `/subscription` | Статус подписки, продление |
 | `/web` | Ссылка на веб-редактор |
 | `/admin_stats` | Статистика (только для ADMIN_ID) |
+
+---
+
+## Подписка (Telegram Stars)
+
+Платёж через встроенный механизм Telegram Stars (invoice). Логика в `bot_v2.py`:
+- `/subscription` — показывает статус и кнопку оплаты
+- `pre_checkout_query` — подтверждение платежа
+- `successful_payment` — активация подписки в БД (таблица `subscriptions`)
+- Проверка активной подписки при каждой обработке голосового/текста
 
 ---
 
@@ -146,6 +208,7 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 | Путь к боту | `~/voice_bot/voice_assistant_bot` |
 | Tmux сессия бота | `bot` |
 | API порт | `8000` |
+| Фронтенд | `web/dist/` → Nginx |
 
 ```bash
 # Подключение
@@ -172,11 +235,15 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```bash
 ssh root@80.249.148.167
 cd ~/voice_bot/voice_assistant_bot
-git fetch origin
-git show origin/claude/review-documentation-gIM7w:bot_v2.py > bot_v2.py
-git show origin/claude/review-documentation-gIM7w:database.py > database.py
-git show origin/claude/review-documentation-gIM7w:style_prompts.py > style_prompts.py
-# Для api/ — скопировать папку целиком
+git fetch origin main
+git show origin/main:bot_v2.py > bot_v2.py
+git show origin/main:database.py > database.py
+git show origin/main:style_prompts.py > style_prompts.py
+# api/ — скопировать папку целиком
+# web/ — пересобрать
+git show origin/main:web/src/components/Editor.jsx > web/src/components/Editor.jsx
+git show origin/main:web/src/components/Editor.css > web/src/components/Editor.css
+cd web && npm install && npm run build
 tmux send-keys -t bot C-c Enter
 sleep 2
 tmux send-keys -t bot 'source venv/bin/activate && python bot_v2.py' Enter
@@ -204,13 +271,23 @@ pip install fastapi uvicorn python-jose[cryptography]
 uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+**Фронтенд не собирается (конфликт версий TipTap):**
+```bash
+cd web && npm install --legacy-peer-deps
+```
+
 ---
 
-## Следующие этапы (TODO)
+## Что реализовано (история этапов)
 
-- **Этап 4:** Frontend (React + Vite + TipTap) в папке `web/`
-- **Этап 5:** Деплой — Nginx, SSL (Let's Encrypt), systemd для API
-- **Этап 6:** Тестирование end-to-end, полировка
+| Этап | Статус | Описание |
+|---|---|---|
+| 1 | ✅ | БД: таблицы users, documents, subscriptions, usage_logs |
+| 2 | ✅ | FastAPI бэкенд: auth (JWT), documents CRUD, internal endpoint |
+| 3 | ✅ | Интеграция бота с API (`/internal/bot/save`) |
+| 4 | ✅ | React фронтенд: Telegram Login, Sidebar, TipTap редактор с тулбаром |
+| 5 | 🔲 | Деплой: Nginx (SSL Let's Encrypt), systemd для API |
+| 6 | 🔲 | Тестирование end-to-end, полировка |
 
 ---
 
