@@ -9,6 +9,13 @@ import sys
 # Add project root to path so database.py is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+# Load .env from project root
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+except ImportError:
+    pass
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
