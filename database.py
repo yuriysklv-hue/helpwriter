@@ -5,7 +5,7 @@ Handles access codes, user authentication, and usage analytics
 
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import logging
 
@@ -20,6 +20,41 @@ def init_database():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
+    # WAL mode — allows concurrent reads (FastAPI) while bot is writing
+    cursor.execute("PRAGMA journal_mode=WAL")
+
+    # Create users table (for web app authentication)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER UNIQUE NOT NULL,
+            first_name TEXT,
+            last_name TEXT,
+            username TEXT,
+            photo_url TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id)")
+
+    # Create documents table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            title TEXT,
+            content TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            source TEXT DEFAULT 'bot',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_deleted INTEGER DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_docs_user_id ON documents(user_id)")
+
     # Create access_codes table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS access_codes (
@@ -29,7 +64,7 @@ def init_database():
             assigned_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             is_active BOOLEAN DEFAULT 1,
-            preferred_style TEXT DEFAULT 'business_casual'
+            preferred_style TEXT DEFAULT 'transcription'
         )
     """)
 
@@ -39,9 +74,26 @@ def init_database():
 
     if 'preferred_style' not in columns:
         logger.info("🔄 Migrating database: adding preferred_style column")
-        cursor.execute("ALTER TABLE access_codes ADD COLUMN preferred_style TEXT DEFAULT 'business_casual'")
+        cursor.execute("ALTER TABLE access_codes ADD COLUMN preferred_style TEXT DEFAULT 'transcription'")
         conn.commit()
         logger.info("✅ Migration completed")
+
+    # Create subscriptions table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_user_id INTEGER NOT NULL,
+            stars_payment_id TEXT NOT NULL,
+            stars_amount INTEGER NOT NULL,
+            period_days INTEGER NOT NULL,
+            started_at TIMESTAMP NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sub_user ON subscriptions(telegram_user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sub_expires ON subscriptions(expires_at)")
 
     # Create usage_logs table
     cursor.execute("""
@@ -186,7 +238,7 @@ def create_auto_access_code(telegram_user_id: int) -> int:
     cursor.execute("""
         INSERT INTO access_codes
         (code, telegram_user_id, assigned_at, is_active, preferred_style)
-        VALUES (?, ?, CURRENT_TIMESTAMP, 1, 'business_casual')
+        VALUES (?, ?, CURRENT_TIMESTAMP, 1, 'transcription')
     """, (auto_code, telegram_user_id))
 
     access_code_id = cursor.lastrowid
@@ -217,24 +269,13 @@ def log_usage(
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Get access code ID
+    # Get access code ID (may be None for subscription-only users)
     cursor.execute(
         "SELECT id FROM access_codes WHERE telegram_user_id = ?",
         (telegram_user_id,)
     )
     result = cursor.fetchone()
-
-    # If user doesn't exist, create automatically (open access)
-    if result is None:
-        conn.close()
-        logger.info(f"📝 New user {telegram_user_id} - creating auto access code")
-        access_code_id = create_auto_access_code(telegram_user_id)
-
-        # Reopen connection for logging
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-    else:
-        access_code_id = result[0]
+    access_code_id = result[0] if result else None
 
     # Insert usage log
     cursor.execute("""
@@ -250,19 +291,17 @@ def log_usage(
 
 def get_admin_stats() -> List[Dict]:
     """
-    Get comprehensive statistics for admin.
+    Get usage statistics per user from usage_logs.
 
     Returns:
-        List of dicts with stats per access code
+        List of dicts with stats per telegram_user_id
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
     cursor.execute("""
         SELECT
-            ac.code,
-            ac.telegram_user_id,
-            ac.assigned_at,
+            ul.telegram_user_id,
             COUNT(ul.id) as total_messages,
             SUM(CASE WHEN ul.message_type = 'voice' THEN 1 ELSE 0 END) as voice_messages,
             SUM(CASE WHEN ul.message_type = 'text' THEN 1 ELSE 0 END) as text_messages,
@@ -270,10 +309,9 @@ def get_admin_stats() -> List[Dict]:
             SUM(ul.text_characters) as total_text_characters,
             MIN(ul.timestamp) as first_usage,
             MAX(ul.timestamp) as last_usage
-        FROM access_codes ac
-        LEFT JOIN usage_logs ul ON ac.id = ul.access_code_id
-        GROUP BY ac.code
-        ORDER BY ac.created_at DESC
+        FROM usage_logs ul
+        GROUP BY ul.telegram_user_id
+        ORDER BY last_usage DESC
     """)
 
     rows = cursor.fetchall()
@@ -282,16 +320,14 @@ def get_admin_stats() -> List[Dict]:
     stats = []
     for row in rows:
         stats.append({
-            "code": row[0],
-            "user_id": row[1],
-            "assigned_at": row[2],
-            "total_messages": row[3] or 0,
-            "voice_messages": row[4] or 0,
-            "text_messages": row[5] or 0,
-            "total_audio_duration": row[6] or 0.0,
-            "total_text_characters": row[7] or 0,
-            "first_usage": row[8],
-            "last_usage": row[9]
+            "user_id": row[0],
+            "total_messages": row[1] or 0,
+            "voice_messages": row[2] or 0,
+            "text_messages": row[3] or 0,
+            "total_audio_duration": row[4] or 0.0,
+            "total_text_characters": row[5] or 0,
+            "first_usage": row[6],
+            "last_usage": row[7],
         })
 
     return stats
@@ -331,7 +367,7 @@ def get_user_style(telegram_user_id: int) -> str:
 
     if result:
         return result[0]
-    return 'business_casual'  # Default style
+    return 'transcription'  # Default mode
 
 
 def set_user_style(telegram_user_id: int, style: str) -> bool:
@@ -361,6 +397,351 @@ def set_user_style(telegram_user_id: int, style: str) -> bool:
     except Exception as e:
         logger.error(f"❌ Error setting user style: {e}")
         return False
+
+
+def get_active_subscription(telegram_user_id: int) -> Optional[Dict]:
+    """Return active subscription or None."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, stars_amount, period_days, started_at, expires_at
+        FROM subscriptions
+        WHERE telegram_user_id = ? AND is_active = 1 AND expires_at > CURRENT_TIMESTAMP
+        ORDER BY expires_at DESC
+        LIMIT 1
+    """, (telegram_user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    if result:
+        return {
+            "id": result[0],
+            "stars_amount": result[1],
+            "period_days": result[2],
+            "started_at": result[3],
+            "expires_at": result[4],
+        }
+    return None
+
+
+def create_subscription(telegram_user_id: int, payment_id: str, stars_amount: int, period_days: int) -> int:
+    """Create subscription record. If active subscription exists, extends it. Returns record ID."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now = datetime.now()
+
+    # Check for existing active subscription to extend from its expiry, not from now
+    cursor.execute("""
+        SELECT expires_at FROM subscriptions
+        WHERE telegram_user_id = ? AND is_active = 1 AND expires_at > CURRENT_TIMESTAMP
+        ORDER BY expires_at DESC LIMIT 1
+    """, (telegram_user_id,))
+    row = cursor.fetchone()
+    base_date = datetime.fromisoformat(row[0]) if row else now
+    expires_at = base_date + timedelta(days=period_days)
+
+    cursor.execute("""
+        INSERT INTO subscriptions
+        (telegram_user_id, stars_payment_id, stars_amount, period_days, started_at, expires_at, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+    """, (telegram_user_id, payment_id, stars_amount, period_days, now.isoformat(), expires_at.isoformat()))
+    sub_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    logger.info(f"✅ Subscription created for user {telegram_user_id}, expires {expires_at.date()}")
+    return sub_id
+
+
+def get_expiring_subscriptions(days_before: int = 3) -> List[Dict]:
+    """Return subscriptions expiring within N days (for reminders)."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now = datetime.now()
+    threshold = now + timedelta(days=days_before)
+    cursor.execute("""
+        SELECT telegram_user_id, expires_at
+        FROM subscriptions
+        WHERE is_active = 1
+          AND expires_at > CURRENT_TIMESTAMP
+          AND expires_at <= ?
+    """, (threshold.isoformat(),))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"user_id": r[0], "expires_at": r[1]} for r in rows]
+
+
+def deactivate_expired_subscriptions() -> int:
+    """Deactivate expired subscriptions. Returns number of affected rows."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE subscriptions SET is_active = 0
+        WHERE expires_at <= CURRENT_TIMESTAMP AND is_active = 1
+    """)
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    if affected > 0:
+        logger.info(f"✅ Deactivated {affected} expired subscriptions")
+    return affected
+
+
+def get_subscription_stats() -> Dict:
+    """Return subscription stats for admin."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*), SUM(stars_amount)
+        FROM subscriptions
+        WHERE is_active = 1 AND expires_at > CURRENT_TIMESTAMP
+    """)
+    active_row = cursor.fetchone()
+    cursor.execute("""
+        SELECT SUM(stars_amount)
+        FROM subscriptions
+        WHERE started_at >= datetime('now', '-30 days')
+    """)
+    monthly_row = cursor.fetchone()
+    conn.close()
+    return {
+        "active_subscriptions": active_row[0] or 0,
+        "stars_last_30d": monthly_row[0] or 0,
+    }
+
+
+# =============================================================================
+# USERS
+# =============================================================================
+
+def _generate_title(content: str, mode: str) -> str:
+    """Generate a short title from document content."""
+    if mode == "structure":
+        for line in content.split('\n'):
+            if line.strip().startswith('ТЕМА:'):
+                return line.strip()[5:].strip()[:80]
+    elif mode == "ideas":
+        for line in content.split('\n'):
+            if line.strip().startswith('Тема:'):
+                return line.strip()[5:].strip()[:80]
+    for line in content.split('\n'):
+        line = line.strip()
+        if line:
+            return (line[:77] + '...') if len(line) > 80 else line
+    return "Без названия"
+
+
+def get_or_create_user(
+    telegram_id: int,
+    first_name: str = None,
+    last_name: str = None,
+    username: str = None,
+    photo_url: str = None,
+) -> int:
+    """Get existing user or create new one. Returns user.id."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM users WHERE telegram_id = ?", (telegram_id,))
+    result = cursor.fetchone()
+    if result:
+        cursor.execute(
+            "UPDATE users SET first_name=?, last_name=?, username=?, last_login_at=CURRENT_TIMESTAMP WHERE telegram_id=?",
+            (first_name, last_name, username, telegram_id),
+        )
+        user_id = result[0]
+    else:
+        cursor.execute(
+            "INSERT INTO users (telegram_id, first_name, last_name, username, photo_url) VALUES (?, ?, ?, ?, ?)",
+            (telegram_id, first_name, last_name, username, photo_url),
+        )
+        user_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return user_id
+
+
+def get_user_by_telegram_id(telegram_id: int) -> Optional[Dict]:
+    """Return user dict by telegram_id, or None."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, telegram_id, first_name, last_name, username, photo_url, created_at, last_login_at FROM users WHERE telegram_id = ?",
+        (telegram_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {
+            "id": row[0], "telegram_id": row[1], "first_name": row[2],
+            "last_name": row[3], "username": row[4], "photo_url": row[5],
+            "created_at": row[6], "last_login_at": row[7],
+        }
+    return None
+
+
+def get_user_by_id(user_id: int) -> Optional[Dict]:
+    """Return user dict by internal id, or None."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, telegram_id, first_name, last_name, username, photo_url, created_at, last_login_at FROM users WHERE id = ?",
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {
+            "id": row[0], "telegram_id": row[1], "first_name": row[2],
+            "last_name": row[3], "username": row[4], "photo_url": row[5],
+            "created_at": row[6], "last_login_at": row[7],
+        }
+    return None
+
+
+def update_last_login(user_id: int) -> None:
+    """Update last_login_at for user."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+# =============================================================================
+# DOCUMENTS
+# =============================================================================
+
+def create_document(
+    user_id: int,
+    content: str,
+    mode: str,
+    title: str = None,
+    source: str = "bot",
+) -> int:
+    """Create a document. Auto-generates title if not provided. Returns document.id."""
+    if not title:
+        title = _generate_title(content, mode)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO documents (user_id, title, content, mode, source) VALUES (?, ?, ?, ?, ?)",
+        (user_id, title, content, mode, source),
+    )
+    doc_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    logger.info(f"✅ Document {doc_id} created for user {user_id} (mode={mode}, source={source})")
+    return doc_id
+
+
+def get_user_documents(
+    user_id: int,
+    limit: int = 20,
+    offset: int = 0,
+    mode: str = None,
+) -> Dict:
+    """Return paginated documents list for user. Excludes soft-deleted."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    where = "user_id = ? AND is_deleted = 0"
+    params = [user_id]
+    if mode:
+        where += " AND mode = ?"
+        params.append(mode)
+
+    cursor.execute(f"SELECT COUNT(*) FROM documents WHERE {where}", params)
+    total = cursor.fetchone()[0]
+
+    cursor.execute(
+        f"SELECT id, title, content, mode, source, created_at, updated_at FROM documents WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params + [limit, offset],
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    items = []
+    for row in rows:
+        content_preview = row[2][:200] if row[2] else ""
+        items.append({
+            "id": row[0], "title": row[1], "preview": content_preview,
+            "mode": row[3], "source": row[4], "created_at": row[5], "updated_at": row[6],
+        })
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+def get_document_by_id(doc_id: int, user_id: int) -> Optional[Dict]:
+    """Return document by id, only if it belongs to user and is not deleted."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, user_id, title, content, mode, source, created_at, updated_at FROM documents WHERE id = ? AND user_id = ? AND is_deleted = 0",
+        (doc_id, user_id),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {
+            "id": row[0], "user_id": row[1], "title": row[2], "content": row[3],
+            "mode": row[4], "source": row[5], "created_at": row[6], "updated_at": row[7],
+        }
+    return None
+
+
+def update_document(doc_id: int, user_id: int, content: str = None, title: str = None) -> bool:
+    """Update document content and/or title. Returns True if updated."""
+    if content is None and title is None:
+        return False
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if content is not None and title is not None:
+        cursor.execute(
+            "UPDATE documents SET content=?, title=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=? AND is_deleted=0",
+            (content, title, doc_id, user_id),
+        )
+    elif content is not None:
+        cursor.execute(
+            "UPDATE documents SET content=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=? AND is_deleted=0",
+            (content, doc_id, user_id),
+        )
+    else:
+        cursor.execute(
+            "UPDATE documents SET title=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=? AND is_deleted=0",
+            (title, doc_id, user_id),
+        )
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+
+def delete_document(doc_id: int, user_id: int) -> bool:
+    """Soft-delete a document. Returns True if deleted."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE documents SET is_deleted=1, updated_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=? AND is_deleted=0",
+        (doc_id, user_id),
+    )
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+
+def get_user_stats(user_id: int) -> Dict:
+    """Return document usage stats for a user."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(*), SUM(CASE WHEN mode='transcription' THEN 1 ELSE 0 END), SUM(CASE WHEN mode='structure' THEN 1 ELSE 0 END), SUM(CASE WHEN mode='ideas' THEN 1 ELSE 0 END) FROM documents WHERE user_id=? AND is_deleted=0",
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return {
+        "total_documents": row[0] or 0,
+        "transcription": row[1] or 0,
+        "structure": row[2] or 0,
+        "ideas": row[3] or 0,
+    }
 
 
 # Initialize database on import
