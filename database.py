@@ -513,19 +513,35 @@ def get_subscription_stats() -> Dict:
 # =============================================================================
 
 def _generate_title(content: str, mode: str) -> str:
-    """Generate a short title from document content."""
+    """Generate a short title from document content — first sentence of text."""
+    # For structure/ideas modes try to extract the dedicated title line
     if mode == "structure":
         for line in content.split('\n'):
-            if line.strip().startswith('ТЕМА:'):
-                return line.strip()[5:].strip()[:80]
+            stripped = line.strip()
+            if stripped.startswith('ТЕМА:'):
+                title = stripped[5:].strip()
+                if title:
+                    return title[:80]
     elif mode == "ideas":
         for line in content.split('\n'):
-            if line.strip().startswith('Тема:'):
-                return line.strip()[5:].strip()[:80]
+            stripped = line.strip()
+            if stripped.startswith('Тема:'):
+                title = stripped[5:].strip()
+                if title:
+                    return title[:80]
+
+    # Default: first sentence from first non-empty, non-header line
+    skip_prefixes = ('ТЕМА:', 'Тема:', 'ПЛАН:', 'ГЛАВНАЯ МЫСЛЬ:', 'ЗАМЕТКИ:')
     for line in content.split('\n'):
         line = line.strip()
-        if line:
-            return (line[:77] + '...') if len(line) > 80 else line
+        if not line or any(line.startswith(p) for p in skip_prefixes):
+            continue
+        # Try to cut at first sentence boundary
+        for sep in ('. ', '! ', '? '):
+            idx = line.find(sep)
+            if 0 < idx <= 80:
+                return line[:idx + 1]
+        return (line[:77] + '...') if len(line) > 80 else line
     return "Без названия"
 
 

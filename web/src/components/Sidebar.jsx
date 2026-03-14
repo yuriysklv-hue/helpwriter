@@ -1,9 +1,9 @@
 import './Sidebar.css'
 
 const MODE_LABELS = {
-  transcription: '✏️ Транскрибация',
-  structure: '📋 Структура',
-  ideas: '💡 Идеи',
+  transcription: '✏️',
+  structure: '📋',
+  ideas: '💡',
 }
 
 export default function Sidebar({ documents, activeId, onSelect, onLogout }) {
@@ -23,8 +23,11 @@ export default function Sidebar({ documents, activeId, onSelect, onLogout }) {
             className={`doc-item ${doc.id === activeId ? 'active' : ''}`}
             onClick={() => onSelect(doc)}
           >
-            <div className="doc-mode">{MODE_LABELS[doc.mode] || doc.mode}</div>
-            <div className="doc-preview">{stripHtml(doc.content).slice(0, 80)}...</div>
+            <div className="doc-title">
+              <span className="doc-mode-icon">{MODE_LABELS[doc.mode] || '📄'}</span>
+              {doc.title || '—'}
+            </div>
+            <div className="doc-preview">{stripHtml(doc.preview || '').slice(0, 80) || '...'}</div>
             <div className="doc-date">{formatDate(doc.created_at)}</div>
           </div>
         ))}

@@ -1,0 +1,38 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy to server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd ~/voice_bot/voice_assistant_bot
+
+            # Pull latest code from main
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Rebuild frontend
+            cd web
+            npm install --legacy-peer-deps
+            npm run build
+            cd ..
+
+            # Restart bot
+            tmux send-keys -t bot C-c Enter
+            sleep 2
+            tmux send-keys -t bot 'source venv/bin/activate && python bot_v2.py' Enter
+
+            echo "✅ Deploy complete"
