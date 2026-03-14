@@ -66,21 +66,35 @@
   background: #eff6ff;
 }
 
-.doc-mode {
-  font-size: 0.75rem;
+.doc-title {
+  font-size: 0.875rem;
   font-weight: 600;
-  color: #2563eb;
+  color: #1a1a1a;
   margin-bottom: 4px;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-mode-icon {
+  font-size: 0.8rem;
+  flex-shrink: 0;
 }
 
 .doc-preview {
-  font-size: 0.875rem;
-  color: #333;
+  font-size: 0.8rem;
+  color: #888;
   line-height: 1.4;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .doc-date {
-  font-size: 0.75rem;
-  color: #999;
+  font-size: 0.72rem;
+  color: #bbb;
 }

@@ -37,11 +37,12 @@ function Dropdown({ label, open, setOpen, children, btnRef }) {
   )
 }
 
-export default function Editor({ content, onSave, saving }) {
+export default function Editor({ content, onSave, onChange, saving }) {
   const [headingOpen, setHeadingOpen] = useState(false)
   const [listOpen, setListOpen] = useState(false)
   const headingRef = useRef(null)
   const listRef = useRef(null)
+  const autoSaveTimer = useRef(null)
 
   const editor = useEditor({
     extensions: [
@@ -57,7 +58,21 @@ export default function Editor({ content, onSave, saving }) {
     editorProps: {
       attributes: { class: 'editor-content' },
     },
+    onUpdate({ editor }) {
+      const html = editor.getHTML()
+      if (onChange) onChange(html)
+      // Debounced auto-save: 2s after last keystroke
+      clearTimeout(autoSaveTimer.current)
+      autoSaveTimer.current = setTimeout(() => {
+        onSave(html)
+      }, 2000)
+    },
   })
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(autoSaveTimer.current)
+  }, [])
 
   useEffect(() => {
     if (editor && content !== editor.getHTML()) {
@@ -66,7 +81,10 @@ export default function Editor({ content, onSave, saving }) {
   }, [content])
 
   const handleSave = useCallback(() => {
-    if (editor) onSave(editor.getHTML())
+    if (editor) {
+      clearTimeout(autoSaveTimer.current)
+      onSave(editor.getHTML())
+    }
   }, [editor, onSave])
 
   useEffect(() => {
