@@ -184,6 +184,19 @@ async def refine_text(raw_text: str, style: str = "transcription") -> str:
 # DOCUMENT SAVING HELPER
 # =============================================================================
 
+def _text_to_html(text: str) -> str:
+    """Convert plain text to HTML paragraphs for TipTap editor."""
+    import html as _html
+    result = []
+    for para in text.split('\n\n'):
+        para = para.strip()
+        if not para:
+            continue
+        escaped = _html.escape(para).replace('\n', '<br>')
+        result.append(f'<p>{escaped}</p>')
+    return ''.join(result) or '<p></p>'
+
+
 def _save_document_from_bot(tg_user, content: str, mode: str) -> tuple[int, str]:
     """
     Save processed document to DB. Returns (doc_id, web_url).
@@ -195,7 +208,8 @@ def _save_document_from_bot(tg_user, content: str, mode: str) -> tuple[int, str]
         last_name=tg_user.last_name,
         username=tg_user.username,
     )
-    doc_id = create_document(user_id=user_id, content=content, mode=mode, source="bot")
+    html_content = _text_to_html(content)
+    doc_id = create_document(user_id=user_id, content=html_content, mode=mode, source="bot")
     url = f"{WEB_URL}/documents/{doc_id}" if WEB_URL else ""
     return doc_id, url
 

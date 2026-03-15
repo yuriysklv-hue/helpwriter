@@ -4,6 +4,16 @@ import Editor from '../components/Editor'
 import api from '../api/client'
 import './EditorPage.css'
 
+// Convert plain text (old bot documents) to HTML paragraphs for TipTap
+function normalizeContent(content) {
+  if (!content) return '<p></p>'
+  if (content.trim().startsWith('<')) return content  // already HTML
+  return content.split(/\n\n+/)
+    .filter(p => p.trim())
+    .map(p => `<p>${p.trim().replace(/\n/g, '<br>')}</p>`)
+    .join('') || '<p></p>'
+}
+
 export default function EditorPage() {
   const [documents, setDocuments] = useState([])
   const [activeDoc, setActiveDoc] = useState(null)
@@ -16,7 +26,7 @@ export default function EditorPage() {
       setDocuments(docs)
       if (docs.length > 0) {
         const full = await api.get(`/documents/${docs[0].id}`)
-        setActiveDoc(full.data)
+        setActiveDoc({ ...full.data, content: normalizeContent(full.data.content) })
       }
     })
   }, [])
@@ -47,7 +57,7 @@ export default function EditorPage() {
       currentHtmlRef.current = null
     }
     const res = await api.get(`/documents/${doc.id}`)
-    setActiveDoc(res.data)
+    setActiveDoc({ ...res.data, content: normalizeContent(res.data.content) })
   }, [activeDoc])
 
   const handleLogout = async () => {

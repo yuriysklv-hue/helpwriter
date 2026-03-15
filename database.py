@@ -512,18 +512,30 @@ def get_subscription_stats() -> Dict:
 # USERS
 # =============================================================================
 
+def _strip_html(text: str) -> str:
+    """Remove HTML tags and decode entities for plain text extraction."""
+    import re, html
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</p>', '\n\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', '', text)
+    return html.unescape(text)
+
+
 def _generate_title(content: str, mode: str) -> str:
     """Generate a short title from document content — first sentence of text."""
+    # Strip HTML if content looks like HTML
+    plain = _strip_html(content) if content.strip().startswith('<') else content
+
     # For structure/ideas modes try to extract the dedicated title line
     if mode == "structure":
-        for line in content.split('\n'):
+        for line in plain.split('\n'):
             stripped = line.strip()
             if stripped.startswith('ТЕМА:'):
                 title = stripped[5:].strip()
                 if title:
                     return title[:80]
     elif mode == "ideas":
-        for line in content.split('\n'):
+        for line in plain.split('\n'):
             stripped = line.strip()
             if stripped.startswith('Тема:'):
                 title = stripped[5:].strip()
@@ -532,7 +544,7 @@ def _generate_title(content: str, mode: str) -> str:
 
     # Default: first sentence from first non-empty, non-header line
     skip_prefixes = ('ТЕМА:', 'Тема:', 'ПЛАН:', 'ГЛАВНАЯ МЫСЛЬ:', 'ЗАМЕТКИ:')
-    for line in content.split('\n'):
+    for line in plain.split('\n'):
         line = line.strip()
         if not line or any(line.startswith(p) for p in skip_prefixes):
             continue
