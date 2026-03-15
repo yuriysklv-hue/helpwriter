@@ -25,10 +25,15 @@ export default function EditorPage() {
       const docs = res.data.items || res.data
       setDocuments(docs)
       if (docs.length > 0) {
-        const full = await api.get(`/documents/${docs[0].id}`)
-        setActiveDoc({ ...full.data, content: normalizeContent(full.data.content) })
+        try {
+          const full = await api.get(`/documents/${docs[0].id}`)
+          setActiveDoc({ ...full.data, content: normalizeContent(full.data.content) })
+        } catch (e) {
+          // If full fetch fails, use list item data (preview only)
+          setActiveDoc({ ...docs[0], content: normalizeContent(docs[0].preview || '') })
+        }
       }
-    })
+    }).catch(console.error)
   }, [])
 
   const handleSave = useCallback(async (html) => {
@@ -56,8 +61,12 @@ export default function EditorPage() {
       api.put(`/documents/${activeDoc.id}`, { content: currentHtmlRef.current }).catch(() => {})
       currentHtmlRef.current = null
     }
-    const res = await api.get(`/documents/${doc.id}`)
-    setActiveDoc({ ...res.data, content: normalizeContent(res.data.content) })
+    try {
+      const res = await api.get(`/documents/${doc.id}`)
+      setActiveDoc({ ...res.data, content: normalizeContent(res.data.content) })
+    } catch (e) {
+      setActiveDoc({ ...doc, content: normalizeContent(doc.preview || '') })
+    }
   }, [activeDoc])
 
   const handleLogout = async () => {
