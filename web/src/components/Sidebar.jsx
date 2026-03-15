@@ -25,7 +25,7 @@ export default function Sidebar({ documents, activeId, onSelect, onLogout }) {
           >
             <div className="doc-title">
               <span className="doc-mode-icon">{MODE_LABELS[doc.mode] || '📄'}</span>
-              {doc.title || '—'}
+              {doc.title || stripHtml(doc.preview || '').slice(0, 60) || '—'}
             </div>
             <div className="doc-preview">{stripHtml(doc.preview || '').slice(0, 80) || '...'}</div>
             <div className="doc-date">{formatDate(doc.created_at)}</div>
