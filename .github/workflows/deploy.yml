@@ -18,7 +18,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
-            cd ~/voice_bot/voice_assistant_bot
+            cd ~/voice_bot
 
             # Pull latest code from main
             git fetch origin main
@@ -30,9 +30,10 @@ jobs:
             npm run build
             cd ..
 
-            # Restart bot
-            tmux send-keys -t bot C-c Enter
+            # Restart bot (create session if missing)
+            tmux send-keys -t bot C-c Enter 2>/dev/null || true
             sleep 2
-            tmux send-keys -t bot 'source venv/bin/activate && python bot_v2.py' Enter
+            tmux has-session -t bot 2>/dev/null || tmux new-session -d -s bot
+            tmux send-keys -t bot "cd ~/voice_bot && source activate && python bot_v2.py" Enter
 
             echo "✅ Deploy complete"
