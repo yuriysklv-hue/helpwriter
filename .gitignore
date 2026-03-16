@@ -3,3 +3,6 @@ __pycache__/
 web/node_modules/
 web/dist/
 web/.env
+*.db
+*.db-shm
+*.db-wal
