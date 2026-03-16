@@ -20,6 +20,9 @@ jobs:
             set -e
             cd ~/voice_bot
 
+            # Ensure data directory exists outside repo (safe from git reset)
+            mkdir -p /root/voice_data
+
             # Pull latest code from main
             git fetch origin main
             git reset --hard origin/main
