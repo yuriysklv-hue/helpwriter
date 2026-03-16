@@ -78,6 +78,22 @@ def init_database():
         conn.commit()
         logger.info("✅ Migration completed")
 
+    # Backfill titles for documents where title is NULL or is a raw mode key
+    mode_keys = ('transcription', 'structure', 'ideas')
+    placeholders = ','.join('?' for _ in mode_keys)
+    cursor.execute(
+        f"SELECT id, content, mode FROM documents WHERE title IS NULL OR title IN ({placeholders})",
+        mode_keys,
+    )
+    rows_to_fix = cursor.fetchall()
+    if rows_to_fix:
+        logger.info(f"🔄 Backfilling titles for {len(rows_to_fix)} documents...")
+        for doc_id, content, mode in rows_to_fix:
+            title = _generate_title(content or '', mode or 'transcription')
+            cursor.execute("UPDATE documents SET title=? WHERE id=?", (title, doc_id))
+        conn.commit()
+        logger.info("✅ Title backfill complete")
+
     # Create subscriptions table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS subscriptions (
