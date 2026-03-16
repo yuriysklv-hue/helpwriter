@@ -205,10 +205,14 @@ npm run build   # → dist/ (статика для Nginx)
 |---|---|
 | IP | `80.249.148.167` |
 | User | `root` |
-| Путь к боту | `~/voice_bot/voice_assistant_bot` |
+| Git repo + рабочая папка | `~/voice_bot/` ← **сюда деплоим** |
+| Venv активация | `source ~/voice_bot/activate` (venv прямо в корне папки) |
 | Tmux сессия бота | `bot` |
+| Tmux сессия API | `api` |
 | API порт | `8000` |
-| Фронтенд | `web/dist/` → Nginx |
+| Фронтенд | `~/voice_bot/web/dist/` → Nginx |
+
+> ⚠️ **НЕ ПУТАТЬ** с `~/voice_bot/voice_assistant_bot/` — это старая копия бота, она не используется!
 
 ```bash
 # Подключение
@@ -217,36 +221,44 @@ ssh root@80.249.148.167
 # Войти в сессию бота
 tmux attach -t bot
 
-# Перезапустить бота
+# Перезапустить бота (из правильной папки!)
+cd ~/voice_bot
 tmux send-keys -t bot C-c Enter
 sleep 2
-tmux send-keys -t bot 'source venv/bin/activate && python bot_v2.py' Enter
+tmux send-keys -t bot 'cd ~/voice_bot && source activate && python bot_v2.py' Enter
 
-# Запустить API (в отдельной tmux-сессии или systemd)
-uvicorn api.main:app --host 0.0.0.0 --port 8000
+# Перезапустить API
+tmux send-keys -t api C-c Enter
+sleep 1
+tmux send-keys -t api 'cd ~/voice_bot && source activate && uvicorn api.main:app --host 0.0.0.0 --port 8000' Enter
 ```
 
 ---
 
 ## ⚠️ Правило деплоя
 
-**Каждый коммит и пуш в GitHub = обязательный деплой на сервер.**
+**CI/CD автоматически деплоит при push в main** через GitHub Actions (`.github/workflows/deploy.yml`).
+
+Ручной деплой (если нужно):
 
 ```bash
 ssh root@80.249.148.167
-cd ~/voice_bot/voice_assistant_bot
+cd ~/voice_bot                  # ← git repo здесь, НЕ в voice_assistant_bot!
 git fetch origin main
-git show origin/main:bot_v2.py > bot_v2.py
-git show origin/main:database.py > database.py
-git show origin/main:style_prompts.py > style_prompts.py
-# api/ — скопировать папку целиком
-# web/ — пересобрать
-git show origin/main:web/src/components/Editor.jsx > web/src/components/Editor.jsx
-git show origin/main:web/src/components/Editor.css > web/src/components/Editor.css
-cd web && npm install && npm run build
+git reset --hard origin/main
+
+# Пересобрать фронтенд
+cd web && npm install --legacy-peer-deps && npm run build && cd ..
+
+# Перезапустить бота
 tmux send-keys -t bot C-c Enter
 sleep 2
-tmux send-keys -t bot 'source venv/bin/activate && python bot_v2.py' Enter
+tmux send-keys -t bot 'cd ~/voice_bot && source activate && python bot_v2.py' Enter
+
+# Перезапустить API (если менялись файлы в api/)
+tmux send-keys -t api C-c Enter
+sleep 1
+tmux send-keys -t api 'cd ~/voice_bot && source activate && uvicorn api.main:app --host 0.0.0.0 --port 8000' Enter
 ```
 
 ---
@@ -255,25 +267,34 @@ tmux send-keys -t bot 'source venv/bin/activate && python bot_v2.py' Enter
 
 **Бот не отвечает:**
 ```bash
-ssh root@80.249.148.167 "ps aux | grep bot"
+ps aux | grep bot_v2
 tmux attach -t bot
 ```
 
-**Ошибка 409 Conflict** (несколько инстансов):
+**Ошибка 409 Conflict** (несколько инстансов — напр. старый бот из voice_assistant_bot тоже запущен):
 ```bash
 pkill -f bot_v2.py
-tmux send-keys -t bot 'python bot_v2.py' Enter
+sleep 2
+tmux send-keys -t bot 'cd ~/voice_bot && source activate && python bot_v2.py' Enter
 ```
 
 **API не запускается:**
 ```bash
+cd ~/voice_bot && source activate
 pip install fastapi uvicorn python-jose[cryptography]
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
 **Фронтенд не собирается (конфликт версий TipTap):**
 ```bash
-cd web && npm install --legacy-peer-deps
+cd ~/voice_bot/web && npm install --legacy-peer-deps && npm run build
+```
+
+**Убедиться что запущен ПРАВИЛЬНЫЙ бот (не старый):**
+```bash
+ps aux | grep bot_v2
+# В выводе должно быть: /root/voice_bot/bot_v2.py
+# НЕ должно быть: /root/voice_bot/voice_assistant_bot/bot_v2.py
 ```
 
 ---
