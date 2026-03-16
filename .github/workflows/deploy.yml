@@ -24,6 +24,10 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
+            # Update nginx config and reload
+            cp nginx.conf /etc/nginx/sites-enabled/helpwriter
+            nginx -s reload
+
             # Rebuild frontend
             cd web
             npm install --legacy-peer-deps
@@ -34,12 +38,12 @@ jobs:
             tmux has-session -t bot 2>/dev/null || tmux new-session -d -s bot
             tmux send-keys -t bot C-c Enter 2>/dev/null || true
             sleep 2
-            tmux send-keys -t bot "cd ~/voice_bot && source venv/bin/activate && python bot_v2.py" Enter
+            tmux send-keys -t bot "cd ~/voice_bot && source voice_assistant_bot/venv/bin/activate && python bot_v2.py" Enter
 
             # Restart API (create session if missing)
             tmux has-session -t api 2>/dev/null || tmux new-session -d -s api
             tmux send-keys -t api C-c Enter 2>/dev/null || true
             sleep 1
-            tmux send-keys -t api "cd ~/voice_bot && source venv/bin/activate && uvicorn api.main:app --host 0.0.0.0 --port 8000" Enter
+            tmux send-keys -t api "cd ~/voice_bot && source voice_assistant_bot/venv/bin/activate && uvicorn api.main:app --host 0.0.0.0 --port 8000" Enter
 
             echo "✅ Deploy complete"
