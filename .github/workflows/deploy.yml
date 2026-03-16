@@ -24,6 +24,10 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
+            # Update nginx config and reload
+            cp nginx.conf /etc/nginx/sites-enabled/helpwriter
+            nginx -s reload
+
             # Rebuild frontend
             cd web
             npm install --legacy-peer-deps
