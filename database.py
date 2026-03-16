@@ -78,12 +78,12 @@ def init_database():
         conn.commit()
         logger.info("✅ Migration completed")
 
-    # Backfill titles for documents where title is NULL or is a raw mode key
-    mode_keys = ('transcription', 'structure', 'ideas')
-    placeholders = ','.join('?' for _ in mode_keys)
+    # Backfill titles for documents where title is NULL or is a raw/display mode name
+    bad_titles = ('transcription', 'structure', 'ideas', 'Транскрибация', 'Структура', 'Идеи')
+    placeholders = ','.join('?' for _ in bad_titles)
     cursor.execute(
         f"SELECT id, content, mode FROM documents WHERE title IS NULL OR title IN ({placeholders})",
-        mode_keys,
+        bad_titles,
     )
     rows_to_fix = cursor.fetchall()
     if rows_to_fix:
