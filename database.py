@@ -11,8 +11,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Database file path
-DB_PATH = os.path.join(os.path.dirname(__file__), "bot_database.db")
+# Database file path — can be overridden via DATABASE_PATH env var
+DB_PATH = os.getenv("DATABASE_PATH") or os.path.join(os.path.dirname(__file__), "bot_database.db")
 
 
 def init_database():
