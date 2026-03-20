@@ -79,15 +79,22 @@ except Exception as e:
 SUBSCRIPTION_PRICE_STARS = 150  # 1 month
 SUBSCRIPTION_DAYS = 30
 
+# Set to True to re-enable paid subscription requirement
+SUBSCRIPTION_ENABLED = False
+
 
 async def require_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """
     Check if user has access.
-    Priority: admin → manual code → active subscription → paywall.
+    Priority: admin → active subscription → paywall.
+    When SUBSCRIPTION_ENABLED=False, all users get free access.
     """
     user_id = update.effective_user.id
 
     if user_id == ADMIN_ID:
+        return True
+
+    if not SUBSCRIPTION_ENABLED:
         return True
 
     # Paid subscription
