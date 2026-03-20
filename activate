@@ -37,7 +37,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="/Users/y.sokolov/Documents/Kojori/voice_assistant_bot/venv"
+VIRTUAL_ENV="/root/voice_bot"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"
