@@ -1,7 +1,7 @@
 # Voice Assistant Bot (HelpWriter) — Контекст для Claude
 
-**Версия:** 3.0
-**Обновлено:** 14 марта 2026
+**Версия:** 3.1
+**Обновлено:** 20 марта 2026
 
 ---
 
@@ -61,11 +61,13 @@ helpwriter/
 │   ├── deps.py            # JWT middleware
 │   └── routes/
 │       ├── auth.py        # POST /api/auth/telegram, GET /verify, POST /logout
-│       ├── documents.py   # GET/PUT/DELETE /api/documents
+│       ├── documents.py   # GET/PUT/DELETE /api/documents, PUT /documents/{id}/move
+│       ├── folders.py     # GET/POST/PUT/DELETE /api/folders
 │       ├── users.py       # GET /api/users/me, /me/stats
 │       └── internal.py    # POST /internal/bot/save
 ├── migrations/
-│   └── 001_add_users_documents.sql
+│   ├── 001_add_users_documents.sql
+│   └── 002_add_folders.sql         # Справочный SQL (migration выполняется через init_database())
 └── web/                   # React + TipTap фронтенд
     ├── index.html
     ├── vite.config.js
@@ -96,9 +98,14 @@ helpwriter/
 | Таблица | Описание |
 |---|---|
 | `users` | Пользователи веб-редактора (telegram_id, имя, username) |
-| `documents` | Документы (user_id FK, content, mode, source, soft-delete) |
+| `documents` | Документы (user_id FK, content, mode, source, soft-delete, **folder_id**) |
+| `folders` | Папки (user_id FK, parent_id FK для вложенности, name) |
 | `subscriptions` | Платные подписки через Telegram Stars |
 | `usage_logs` | Логи использования для аналитики |
+
+### Концепция "Новые" (inbox)
+`folder_id = NULL` — документ в разделе "Новые". Все новые документы от бота попадают сюда.
+Перемещение в "Новые" = `PUT /api/documents/{id}/move` с `{ "folder_id": null }`.
 
 ---
 
@@ -120,8 +127,8 @@ INTERNAL_API_TOKEN="..."           # Токен для /internal/bot/save
 
 ### Запуск API локально
 ```bash
-cd ~/voice_bot/voice_assistant_bot
-source venv/bin/activate
+cd ~/voice_bot
+source activate
 uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -132,10 +139,15 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 | POST | `/api/auth/telegram` | Авторизация через Telegram Login Widget |
 | GET | `/api/auth/verify` | Проверка токена |
 | POST | `/api/auth/logout` | Выход |
-| GET | `/api/documents` | Список документов (пагинация, фильтр по mode) |
+| GET | `/api/documents` | Список документов (`?view=inbox` или `?folder_id=N`) |
 | GET | `/api/documents/{id}` | Получить документ |
 | PUT | `/api/documents/{id}` | Обновить документ |
 | DELETE | `/api/documents/{id}` | Удалить документ (soft delete) |
+| PUT | `/api/documents/{id}/move` | Переместить в папку (`folder_id: null` = Новые) |
+| GET | `/api/folders` | Список всех папок пользователя |
+| POST | `/api/folders` | Создать папку (`name`, опц. `parent_id`) |
+| PUT | `/api/folders/{id}` | Переименовать папку |
+| DELETE | `/api/folders/{id}` | Удалить папку (каскадно + docs → Новые) |
 | GET | `/api/users/me` | Профиль текущего пользователя |
 | GET | `/api/users/me/stats` | Статистика по документам |
 | POST | `/internal/bot/save` | Сохранить документ из бота (X-Internal-Token) |
@@ -307,8 +319,15 @@ ps aux | grep bot_v2
 | 2 | ✅ | FastAPI бэкенд: auth (JWT), documents CRUD, internal endpoint |
 | 3 | ✅ | Интеграция бота с API (`/internal/bot/save`) |
 | 4 | ✅ | React фронтенд: Telegram Login, Sidebar, TipTap редактор с тулбаром |
+| 4.1 | ✅ | Папки: таблица folders, CRUD API, Sidebar с деревом папок, inbox "Новые" |
 | 5 | 🔲 | Деплой: Nginx (SSL Let's Encrypt), systemd для API |
 | 6 | 🔲 | Тестирование end-to-end, полировка |
+
+---
+
+## Известные проблемы (на следующую сессию)
+
+- **Бот не обрабатывает аудио** после деплоя папок. Симптомы неизвестны — нужны логи из `tmux attach -t bot`. Возможные причины: ошибка импорта в database.py после миграции folders, AssemblyAI / DeepSeek API недоступны, или старый инстанс бота из `voice_assistant_bot/` запущен параллельно (409 Conflict).
 
 ---
 
