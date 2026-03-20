@@ -19,7 +19,7 @@ except ImportError:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import auth, documents, users, internal
+from api.routes import auth, documents, folders, users, internal
 
 WEB_URL = os.getenv("WEB_URL", "http://localhost:5173")
 
@@ -41,6 +41,7 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(documents.router, prefix="/api/documents", tags=["documents"])
+app.include_router(folders.router, prefix="/api/folders", tags=["folders"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(internal.router, prefix="/internal", tags=["internal"])
 
