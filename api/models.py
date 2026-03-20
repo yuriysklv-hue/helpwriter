@@ -27,6 +27,7 @@ class Document(BaseModel):
     source: str
     created_at: str
     updated_at: str
+    folder_id: Optional[int] = None
 
 
 class DocumentListItem(BaseModel):
@@ -37,6 +38,7 @@ class DocumentListItem(BaseModel):
     source: str
     created_at: str
     updated_at: str
+    folder_id: Optional[int] = None
 
 
 class DocumentsResponse(BaseModel):
@@ -49,6 +51,27 @@ class DocumentsResponse(BaseModel):
 class DocumentUpdate(BaseModel):
     content: Optional[str] = None
     title: Optional[str] = None
+
+
+class MoveDocument(BaseModel):
+    folder_id: Optional[int] = None  # None = move to Новые
+
+
+class Folder(BaseModel):
+    id: int
+    user_id: int
+    parent_id: Optional[int] = None
+    name: str
+    created_at: str
+
+
+class FolderCreate(BaseModel):
+    name: str
+    parent_id: Optional[int] = None
+
+
+class FolderRename(BaseModel):
+    name: str
 
 
 class AuthRequest(BaseModel):

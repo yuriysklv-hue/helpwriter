@@ -55,6 +55,28 @@ def init_database():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_docs_user_id ON documents(user_id)")
 
+    # Create folders table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS folders (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
+            parent_id  INTEGER,
+            name       TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id)   REFERENCES users(id),
+            FOREIGN KEY (parent_id) REFERENCES folders(id)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_folders_user_id ON folders(user_id)")
+
+    # Add folder_id to documents if not exists (migration for existing DBs)
+    cursor.execute("PRAGMA table_info(documents)")
+    doc_columns = [col[1] for col in cursor.fetchall()]
+    if 'folder_id' not in doc_columns:
+        cursor.execute("ALTER TABLE documents ADD COLUMN folder_id INTEGER REFERENCES folders(id)")
+        conn.commit()
+        logger.info("✅ Migration: added folder_id to documents")
+
     # Create access_codes table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS access_codes (
@@ -681,21 +703,34 @@ def get_user_documents(
     limit: int = 20,
     offset: int = 0,
     mode: str = None,
+    view: str = None,
+    folder_id: int = None,
 ) -> Dict:
-    """Return paginated documents list for user. Excludes soft-deleted."""
+    """Return paginated documents list for user. Excludes soft-deleted.
+
+    view='inbox'   → only docs with folder_id IS NULL (Новые)
+    folder_id=N    → only docs in folder N
+    neither        → all docs (backward-compatible default)
+    """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     where = "user_id = ? AND is_deleted = 0"
-    params = [user_id]
+    params: list = [user_id]
     if mode:
         where += " AND mode = ?"
         params.append(mode)
+    if view == 'inbox':
+        where += " AND folder_id IS NULL"
+    elif folder_id is not None:
+        where += " AND folder_id = ?"
+        params.append(folder_id)
 
     cursor.execute(f"SELECT COUNT(*) FROM documents WHERE {where}", params)
     total = cursor.fetchone()[0]
 
     cursor.execute(
-        f"SELECT id, title, content, mode, source, created_at, updated_at FROM documents WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        f"SELECT id, title, content, mode, source, created_at, updated_at, folder_id "
+        f"FROM documents WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
         params + [limit, offset],
     )
     rows = cursor.fetchall()
@@ -707,6 +742,7 @@ def get_user_documents(
         items.append({
             "id": row[0], "title": row[1], "preview": content_preview,
             "mode": row[3], "source": row[4], "created_at": row[5], "updated_at": row[6],
+            "folder_id": row[7],
         })
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
@@ -716,7 +752,8 @@ def get_document_by_id(doc_id: int, user_id: int) -> Optional[Dict]:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, user_id, title, content, mode, source, created_at, updated_at FROM documents WHERE id = ? AND user_id = ? AND is_deleted = 0",
+        "SELECT id, user_id, title, content, mode, source, created_at, updated_at, folder_id "
+        "FROM documents WHERE id = ? AND user_id = ? AND is_deleted = 0",
         (doc_id, user_id),
     )
     row = cursor.fetchone()
@@ -725,6 +762,7 @@ def get_document_by_id(doc_id: int, user_id: int) -> Optional[Dict]:
         return {
             "id": row[0], "user_id": row[1], "title": row[2], "content": row[3],
             "mode": row[4], "source": row[5], "created_at": row[6], "updated_at": row[7],
+            "folder_id": row[8],
         }
     return None
 
@@ -786,6 +824,114 @@ def get_user_stats(user_id: int) -> Dict:
         "structure": row[2] or 0,
         "ideas": row[3] or 0,
     }
+
+
+# =============================================================================
+# FOLDERS
+# =============================================================================
+
+def get_user_folders(user_id: int) -> List[Dict]:
+    """Return all folders for user as a flat list (build tree on client)."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, user_id, parent_id, name, created_at FROM folders "
+        "WHERE user_id = ? ORDER BY name COLLATE NOCASE",
+        (user_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "user_id": r[1], "parent_id": r[2], "name": r[3], "created_at": r[4]}
+        for r in rows
+    ]
+
+
+def create_folder(user_id: int, name: str, parent_id: int = None) -> Dict:
+    """Create a folder. Returns the created folder dict."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO folders (user_id, parent_id, name) VALUES (?, ?, ?)",
+        (user_id, parent_id, name),
+    )
+    folder_id = cursor.lastrowid
+    conn.commit()
+    cursor.execute(
+        "SELECT id, user_id, parent_id, name, created_at FROM folders WHERE id = ?",
+        (folder_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    logger.info(f"✅ Folder '{name}' created for user {user_id}")
+    return {"id": row[0], "user_id": row[1], "parent_id": row[2], "name": row[3], "created_at": row[4]}
+
+
+def rename_folder(folder_id: int, user_id: int, name: str) -> bool:
+    """Rename a folder. Returns True if updated."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE folders SET name = ? WHERE id = ? AND user_id = ?",
+        (name, folder_id, user_id),
+    )
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+
+def _collect_folder_ids(cursor, root_id: int) -> List[int]:
+    """Recursively collect a folder's id and all descendant folder ids."""
+    ids = [root_id]
+    cursor.execute("SELECT id FROM folders WHERE parent_id = ?", (root_id,))
+    for (child_id,) in cursor.fetchall():
+        ids.extend(_collect_folder_ids(cursor, child_id))
+    return ids
+
+
+def delete_folder(folder_id: int, user_id: int) -> bool:
+    """Delete folder (and all descendants). Moves their docs to Новые (NULL).
+    Returns True if deleted."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    # Verify ownership
+    cursor.execute("SELECT id FROM folders WHERE id = ? AND user_id = ?", (folder_id, user_id))
+    if not cursor.fetchone():
+        conn.close()
+        return False
+    # Collect this folder + all nested descendants
+    all_ids = _collect_folder_ids(cursor, folder_id)
+    placeholders = ','.join('?' for _ in all_ids)
+    # Move all affected documents to Новые
+    cursor.execute(
+        f"UPDATE documents SET folder_id = NULL WHERE folder_id IN ({placeholders}) AND user_id = ?",
+        [*all_ids, user_id],
+    )
+    # Delete folders (children first won't matter since we delete all at once)
+    cursor.execute(
+        f"DELETE FROM folders WHERE id IN ({placeholders}) AND user_id = ?",
+        [*all_ids, user_id],
+    )
+    conn.commit()
+    conn.close()
+    logger.info(f"✅ Folder {folder_id} (and {len(all_ids)-1} descendants) deleted for user {user_id}")
+    return True
+
+
+def move_document_to_folder(doc_id: int, user_id: int, folder_id: int = None) -> bool:
+    """Move document to a folder. folder_id=None moves to Новые. Returns True if updated."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE documents SET folder_id = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND user_id = ? AND is_deleted = 0",
+        (folder_id, doc_id, user_id),
+    )
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
 
 
 # Initialize database on import

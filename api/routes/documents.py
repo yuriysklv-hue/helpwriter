@@ -3,15 +3,16 @@ Documents routes — CRUD for user documents.
 """
 
 from typing import Optional
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query
+from fastapi import APIRouter, Cookie, HTTPException, Query
 
 from api.deps import get_current_user_id
-from api.models import Document, DocumentsResponse, DocumentUpdate
+from api.models import Document, DocumentsResponse, DocumentUpdate, MoveDocument
 from database import (
     get_document_by_id,
     get_user_documents,
     update_document,
     delete_document,
+    move_document_to_folder,
 )
 
 router = APIRouter()
@@ -22,11 +23,21 @@ async def list_documents(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     mode: Optional[str] = Query(None),
+    view: Optional[str] = Query(None),       # 'inbox' → folder_id IS NULL (Новые)
+    folder_id: Optional[int] = Query(None),  # specific folder ID
     access_token: Optional[str] = Cookie(None),
 ):
-    """Return paginated list of user's documents."""
+    """Return paginated list of user's documents.
+
+    - view=inbox   → documents in Новые (no folder assigned)
+    - folder_id=N  → documents in folder N
+    - (default)    → all documents
+    """
     user_id = get_current_user_id(access_token)
-    result = get_user_documents(user_id=user_id, limit=limit, offset=offset, mode=mode)
+    result = get_user_documents(
+        user_id=user_id, limit=limit, offset=offset,
+        mode=mode, view=view, folder_id=folder_id,
+    )
     return result
 
 
@@ -57,6 +68,21 @@ async def edit_document(
         content=body.content,
         title=body.title,
     )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Document not found")
+    doc = get_document_by_id(doc_id=doc_id, user_id=user_id)
+    return doc
+
+
+@router.put("/{doc_id}/move", response_model=Document)
+async def move_document(
+    doc_id: int,
+    body: MoveDocument,
+    access_token: Optional[str] = Cookie(None),
+):
+    """Move document to a folder. folder_id=null moves to Новые."""
+    user_id = get_current_user_id(access_token)
+    ok = move_document_to_folder(doc_id=doc_id, user_id=user_id, folder_id=body.folder_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Document not found")
     doc = get_document_by_id(doc_id=doc_id, user_id=user_id)
