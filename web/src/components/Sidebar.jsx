@@ -298,8 +298,6 @@ export default function Sidebar({
             <p className="empty-folders-hint">Нажмите + чтобы создать папку</p>
           )}
         </div>
-      </div>
-
       </div>{/* /sidebar-nav */}
 
       {/* ── Список документов текущего раздела ── */}
