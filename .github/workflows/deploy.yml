@@ -28,6 +28,9 @@ jobs:
             cp nginx.conf /etc/nginx/sites-enabled/helpwriter
             nginx -s reload
 
+            # Install/update Python dependencies
+            source activate && pip install -r requirements.txt
+
             # Rebuild frontend
             cd web
             npm install --legacy-peer-deps
