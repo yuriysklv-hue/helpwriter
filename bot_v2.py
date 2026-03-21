@@ -45,6 +45,8 @@ ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # Your Telegram user ID
 WEB_URL = os.getenv("WEB_URL", "")  # e.g. https://helpwriter.io
 PROXY_URL = os.getenv("PROXY_URL", "")  # e.g. socks5://user:pass@host:port or http://host:port
+INTERNAL_API_URL = os.getenv("INTERNAL_API_URL", "")  # e.g. http://80.249.148.167:8000
+INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "")
 
 if DEEPSEEK_API_KEY:
     logger.info(f"✅ DEEPSEEK_API_KEY loaded successfully")
@@ -208,16 +210,36 @@ def _text_to_html(text: str) -> str:
 
 def _save_document_from_bot(tg_user, content: str, mode: str) -> tuple[int, str]:
     """
-    Save processed document to DB. Returns (doc_id, web_url).
-    web_url is empty string if WEB_URL is not configured.
+    Save processed document. Returns (doc_id, web_url).
+    Uses HTTP API when INTERNAL_API_URL is set, otherwise writes to local DB.
     """
+    html_content = _text_to_html(content)
+
+    if INTERNAL_API_URL and INTERNAL_API_TOKEN:
+        import requests as _requests
+        resp = _requests.post(
+            f"{INTERNAL_API_URL}/internal/bot/save",
+            json={
+                "telegram_id": tg_user.id,
+                "first_name": tg_user.first_name,
+                "last_name": tg_user.last_name,
+                "username": tg_user.username,
+                "content": html_content,
+                "mode": mode,
+            },
+            headers={"X-Internal-Token": INTERNAL_API_TOKEN},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["document_id"], data["url"]
+
     user_id = get_or_create_user(
         telegram_id=tg_user.id,
         first_name=tg_user.first_name,
         last_name=tg_user.last_name,
         username=tg_user.username,
     )
-    html_content = _text_to_html(content)
     doc_id = create_document(user_id=user_id, content=html_content, mode=mode, source="bot")
     url = f"{WEB_URL}/documents/{doc_id}" if WEB_URL else ""
     return doc_id, url
