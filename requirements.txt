@@ -1,7 +1,7 @@
-python-telegram-bot>=20.0
+python-telegram-bot>=20.0,<22.0
 requests
 openai>=1.0.0
-assemblyai
+assemblyai>=0.17.0,<0.60.0
 pydub
 python-dotenv
 fastapi
