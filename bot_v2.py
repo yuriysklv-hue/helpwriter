@@ -15,6 +15,7 @@ import asyncio
 import time
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, LabeledPrice, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, PreCheckoutQueryHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest
 from openai import OpenAI
 import assemblyai as aai
 from pydub import AudioSegment
@@ -43,6 +44,7 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # Your Telegram user ID
 WEB_URL = os.getenv("WEB_URL", "")  # e.g. https://helpwriter.io
+PROXY_URL = os.getenv("PROXY_URL", "")  # e.g. socks5://user:pass@host:port or http://host:port
 
 if DEEPSEEK_API_KEY:
     logger.info(f"✅ DEEPSEEK_API_KEY loaded successfully")
@@ -667,7 +669,12 @@ def main():
     if not ASSEMBLYAI_API_KEY:
         raise ValueError("ASSEMBLYAI_API_KEY environment variable not set")
 
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    if PROXY_URL:
+        logger.info(f"🔌 Using proxy: {PROXY_URL}")
+        request = HTTPXRequest(proxy=PROXY_URL)
+        application = Application.builder().token(TELEGRAM_BOT_TOKEN).request(request).build()
+    else:
+        application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
