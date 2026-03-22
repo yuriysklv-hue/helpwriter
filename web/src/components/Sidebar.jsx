@@ -1,4 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import {
+  Search, Plus, Trash2, ChevronRight, ChevronDown,
+  MoreHorizontal, LogOut, Sun, Moon, Folder, FolderOpen, Inbox
+} from 'lucide-react'
+import { useTheme } from '../contexts/ThemeContext'
 import './Sidebar.css'
 
 const MODE_LABELS = {
@@ -6,6 +11,13 @@ const MODE_LABELS = {
   structure: '📋',
   ideas: '💡',
 }
+
+const MODE_DISPLAY_NAMES = {
+  transcription: 'транскрипция',
+  structure: 'структура',
+  ideas: 'идеи',
+}
+
 const MODE_KEYS = new Set(['transcription', 'structure', 'ideas'])
 
 function getDisplayTitle(doc) {
@@ -19,9 +31,42 @@ function stripHtml(html) {
   return (html || '').replace(/<[^>]+>/g, '')
 }
 
-function formatDate(iso) {
+function formatTime(iso) {
   const d = new Date(iso)
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+}
+
+function groupDocumentsByDate(documents) {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const weekAgo = new Date(today)
+  weekAgo.setDate(weekAgo.getDate() - 7)
+
+  const groups = { today: [], yesterday: [], thisWeek: [], older: [] }
+
+  documents.forEach(doc => {
+    const docDate = new Date(doc.created_at)
+    if (docDate >= today) {
+      groups.today.push(doc)
+    } else if (docDate >= yesterday) {
+      groups.yesterday.push(doc)
+    } else if (docDate >= weekAgo) {
+      groups.thisWeek.push(doc)
+    } else {
+      groups.older.push(doc)
+    }
+  })
+
+  return groups
+}
+
+const DATE_LABELS = {
+  today: 'Сегодня',
+  yesterday: 'Вчера',
+  thisWeek: 'На этой неделе',
+  older: 'Ранее',
 }
 
 function buildTree(folders) {
@@ -38,7 +83,6 @@ function buildTree(folders) {
   return roots
 }
 
-// Returns flat list of folders in tree order with depth, for the move menu
 function getFoldersSorted(folders) {
   const map = {}
   folders.forEach(f => { map[f.id] = { ...f, children: [] } })
@@ -87,9 +131,17 @@ function FolderNode({
           className="folder-toggle"
           onClick={e => { e.stopPropagation(); if (hasChildren) onToggle(folder.id) }}
         >
-          {hasChildren ? (isExpanded ? '▾' : '▸') : <span className="folder-toggle-spacer" />}
+          {hasChildren
+            ? (isExpanded
+                ? <ChevronDown size={12} />
+                : <ChevronRight size={12} />)
+            : <span className="folder-toggle-spacer" />}
         </span>
-        <span className="folder-icon-em">{isExpanded && hasChildren ? '📂' : '📁'}</span>
+        <span className="folder-icon-em">
+          {isExpanded && hasChildren
+            ? <FolderOpen size={14} />
+            : <Folder size={14} />}
+        </span>
         {isRenaming ? (
           <input
             className="folder-name-input"
@@ -111,7 +163,7 @@ function FolderNode({
           onClick={e => onMenuOpen(e, 'folder', folder.id)}
           title="Действия с папкой"
         >
-          ···
+          <MoreHorizontal size={14} />
         </button>
       </div>
       {isExpanded && hasChildren && (
@@ -155,19 +207,32 @@ export default function Sidebar({
   onDeleteDocument,
   onLogout,
 }) {
+  const { theme, toggleTheme } = useTheme()
+  const [searchQuery, setSearchQuery] = useState('')
   const [expandedFolders, setExpandedFolders] = useState(new Set())
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
   const [renamingId, setRenamingId] = useState(null)
   const [renameValue, setRenameValue] = useState('')
   const [menuState, setMenuState] = useState(null)
-  // menuState: { type: 'doc'|'folder', id, x, y, step: 'main'|'move' }
 
-  // Prevents blur from committing rename after Escape cancels it
   const skipBlurRef = useRef(false)
-
   const tree = useMemo(() => buildTree(folders), [folders])
   const foldersSorted = useMemo(() => getFoldersSorted(folders), [folders])
+
+  // Filter documents by search query
+  const filteredDocs = useMemo(() => {
+    if (!searchQuery.trim()) return documents
+    const q = searchQuery.toLowerCase()
+    return documents.filter(doc =>
+      getDisplayTitle(doc).toLowerCase().includes(q) ||
+      stripHtml(doc.preview || '').toLowerCase().includes(q)
+    )
+  }, [documents, searchQuery])
+
+  // Group filtered docs by date
+  const groupedDocs = useMemo(() => groupDocumentsByDate(filteredDocs), [filteredDocs])
+  const hasAnyDocs = filteredDocs.length > 0
 
   // Close context menu on outside mousedown
   useEffect(() => {
@@ -198,13 +263,8 @@ export default function Sidebar({
   }
 
   const handleRenameCommit = (id) => {
-    if (skipBlurRef.current) {
-      skipBlurRef.current = false
-      return
-    }
-    if (id && renameValue.trim()) {
-      onFolderRename(id, renameValue.trim())
-    }
+    if (skipBlurRef.current) { skipBlurRef.current = false; return }
+    if (id && renameValue.trim()) onFolderRename(id, renameValue.trim())
     setRenamingId(null)
     setRenameValue('')
   }
@@ -230,118 +290,152 @@ export default function Sidebar({
     <div className="sidebar">
       {/* ── Шапка ── */}
       <div className="sidebar-header">
-        <h2>HelpWriter</h2>
-        <button className="logout-btn" onClick={onLogout}>Выйти</button>
-      </div>
-
-      {/* ── Тело сайдбара (прокручивается целиком) ── */}
-      <div className="sidebar-body">
-
-      {/* ── Навигация ── */}
-      <div className="sidebar-nav">
-        {/* Новые (inbox) */}
-        <div
-          className={`sidebar-view-item${selectedView?.type === 'inbox' ? ' active' : ''}`}
-          onClick={() => onViewSelect({ type: 'inbox' })}
-        >
-          <span className="view-icon">📥</span>
-          <span className="view-name">Новые</span>
-        </div>
-
-        {/* Папки */}
-        <div className="folders-section">
-          <div className="folders-section-header">
-            <span className="folders-label">Папки</span>
-            <button
-              className="add-folder-btn"
-              title="Создать папку"
-              onClick={e => { e.stopPropagation(); setCreatingFolder(true) }}
-            >
-              +
+        <div className="sidebar-header-top">
+          <h2>HelpWriter</h2>
+          <div className="sidebar-header-actions">
+            <button className="icon-btn" onClick={toggleTheme} title={theme === 'light' ? 'Тёмная тема' : 'Светлая тема'}>
+              {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+            </button>
+            <button className="icon-btn" onClick={onLogout} title="Выйти">
+              <LogOut size={16} />
             </button>
           </div>
-
-          {creatingFolder && (
-            <div className="folder-create-row">
-              <span className="folder-create-icon">📁</span>
-              <input
-                className="folder-name-input"
-                autoFocus
-                value={newFolderName}
-                onChange={e => setNewFolderName(e.target.value)}
-                onKeyDown={handleNewFolderKeyDown}
-                onBlur={() => { setCreatingFolder(false); setNewFolderName('') }}
-                placeholder="Название папки..."
-              />
-            </div>
-          )}
-
-          {tree.map(folder => (
-            <FolderNode
-              key={folder.id}
-              folder={folder}
-              level={0}
-              selectedView={selectedView}
-              expandedFolders={expandedFolders}
-              renamingId={renamingId}
-              renameValue={renameValue}
-              onViewSelect={onViewSelect}
-              onToggle={toggleFolder}
-              onRenameChange={setRenameValue}
-              onRenameCommit={handleRenameCommit}
-              onRenameCancel={handleRenameCancel}
-              onMenuOpen={openMenu}
-            />
-          ))}
-
-          {folders.length === 0 && !creatingFolder && (
-            <p className="empty-folders-hint">Нажмите + чтобы создать папку</p>
-          )}
         </div>
-      </div>{/* /sidebar-nav */}
-
-      {/* ── Список документов текущего раздела ── */}
-      <div className="doc-list">
-        {documents.length === 0 && (
-          <p className="empty-hint">
-            {selectedView?.type === 'inbox'
-              ? 'Новых документов нет.\nНадиктуйте голосовое в боте.'
-              : 'Папка пуста.'}
-          </p>
-        )}
-        {documents.map(doc => (
-          <div
-            key={doc.id}
-            className={`doc-item${doc.id === activeId ? ' active' : ''}`}
-            onClick={() => onSelect(doc)}
-          >
-            <div className="doc-title">
-              <span className="doc-mode-icon">{MODE_LABELS[doc.mode] || '📄'}</span>
-              <span className="doc-title-text">{getDisplayTitle(doc)}</span>
-              <button
-                className="item-menu-btn"
-                onClick={e => openMenu(e, 'doc', doc.id)}
-                title="Действия с документом"
-              >
-                ···
-              </button>
-            </div>
-            <div className="doc-preview">{stripHtml(doc.preview || '').trim().slice(0, 80) || '(пустой документ)'}</div>
-            <div className="doc-date">{formatDate(doc.created_at)}</div>
-          </div>
-        ))}
+        <div className="sidebar-search">
+          <Search size={14} className="sidebar-search-icon" />
+          <input
+            className="sidebar-search-input"
+            type="text"
+            placeholder="Поиск документов..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+        </div>
       </div>
 
-      </div>{/* /sidebar-body */}
+      {/* ── Тело сайдбара ── */}
+      <div className="sidebar-body">
 
-      {/* ── Контекстное меню (fixed overlay) ── */}
+        {/* ── Навигация ── */}
+        <div className="sidebar-nav">
+          <div
+            className={`sidebar-view-item${selectedView?.type === 'inbox' ? ' active' : ''}`}
+            onClick={() => onViewSelect({ type: 'inbox' })}
+          >
+            <Inbox size={15} className="view-icon" />
+            <span className="view-name">Новые</span>
+          </div>
+
+          <div className="folders-section">
+            <div className="folders-section-header">
+              <span className="folders-label">Папки</span>
+              <button
+                className="add-folder-btn"
+                title="Создать папку"
+                onClick={e => { e.stopPropagation(); setCreatingFolder(true) }}
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+
+            {creatingFolder && (
+              <div className="folder-create-row">
+                <Folder size={14} className="folder-create-icon" />
+                <input
+                  className="folder-name-input"
+                  autoFocus
+                  value={newFolderName}
+                  onChange={e => setNewFolderName(e.target.value)}
+                  onKeyDown={handleNewFolderKeyDown}
+                  onBlur={() => { setCreatingFolder(false); setNewFolderName('') }}
+                  placeholder="Название папки..."
+                />
+              </div>
+            )}
+
+            {tree.map(folder => (
+              <FolderNode
+                key={folder.id}
+                folder={folder}
+                level={0}
+                selectedView={selectedView}
+                expandedFolders={expandedFolders}
+                renamingId={renamingId}
+                renameValue={renameValue}
+                onViewSelect={onViewSelect}
+                onToggle={toggleFolder}
+                onRenameChange={setRenameValue}
+                onRenameCommit={handleRenameCommit}
+                onRenameCancel={handleRenameCancel}
+                onMenuOpen={openMenu}
+              />
+            ))}
+
+            {folders.length === 0 && !creatingFolder && (
+              <p className="empty-folders-hint">Нажмите + чтобы создать папку</p>
+            )}
+          </div>
+        </div>
+
+        {/* ── Список документов ── */}
+        <div className="doc-list">
+          {!hasAnyDocs && (
+            <p className="empty-hint">
+              {searchQuery.trim()
+                ? 'Ничего не найдено'
+                : selectedView?.type === 'inbox'
+                  ? 'Новых документов нет.\nНадиктуйте голосовое в боте.'
+                  : 'Папка пуста.'}
+            </p>
+          )}
+
+          {hasAnyDocs && Object.entries(groupedDocs).map(([key, docs]) => {
+            if (docs.length === 0) return null
+            return (
+              <div key={key} className="date-group">
+                <div className="date-group-title">{DATE_LABELS[key]}</div>
+                {docs.map(doc => (
+                  <div
+                    key={doc.id}
+                    className={`doc-card${doc.id === activeId ? ' active' : ''}`}
+                    onClick={() => onSelect(doc)}
+                  >
+                    <div className="doc-card-header">
+                      <span className="doc-mode-icon">{MODE_LABELS[doc.mode] || '📄'}</span>
+                      <span className="doc-title">{getDisplayTitle(doc)}</span>
+                      <span className="doc-time">{formatTime(doc.created_at)}</span>
+                      <button
+                        className="item-menu-btn"
+                        onClick={e => openMenu(e, 'doc', doc.id)}
+                        title="Действия с документом"
+                      >
+                        <MoreHorizontal size={14} />
+                      </button>
+                    </div>
+                    <div className="doc-preview">
+                      {stripHtml(doc.preview || '').trim().slice(0, 100) || '(пустой документ)'}
+                    </div>
+                    <div className="doc-card-footer">
+                      <span className={`mode-badge mode-badge--${doc.mode || 'transcription'}`}>
+                        {MODE_LABELS[doc.mode] || '📄'} {MODE_DISPLAY_NAMES[doc.mode] || doc.mode}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          })}
+        </div>
+
+      </div>
+
+      {/* ── Контекстное меню ── */}
       {menuState && (
         <div
           className="context-menu"
           style={{ top: menuState.y, left: menuState.x }}
           onMouseDown={e => e.stopPropagation()}
         >
-          {/* Документ — основное меню */}
           {menuState.type === 'doc' && menuState.step === 'main' && (
             <>
               <button
@@ -355,12 +449,11 @@ export default function Sidebar({
                 className="menu-item menu-item-danger"
                 onClick={() => { onDeleteDocument(menuState.id); setMenuState(null) }}
               >
-                Удалить
+                <Trash2 size={14} /> Удалить
               </button>
             </>
           )}
 
-          {/* Документ — выбор папки */}
           {menuState.type === 'doc' && menuState.step === 'move' && (
             <>
               <button
@@ -374,7 +467,7 @@ export default function Sidebar({
                 className="menu-item"
                 onClick={() => { onMoveDocument(menuState.id, null); setMenuState(null) }}
               >
-                📥 Новые
+                <Inbox size={14} /> Новые
               </button>
               {foldersSorted.map(f => (
                 <button
@@ -383,16 +476,13 @@ export default function Sidebar({
                   style={{ paddingLeft: `${12 + f.depth * 12}px` }}
                   onClick={() => { onMoveDocument(menuState.id, f.id); setMenuState(null) }}
                 >
-                  📁 {f.name}
+                  <Folder size={14} /> {f.name}
                 </button>
               ))}
-              {folders.length === 0 && (
-                <span className="menu-empty">Нет папок</span>
-              )}
+              {folders.length === 0 && <span className="menu-empty">Нет папок</span>}
             </>
           )}
 
-          {/* Папка — меню */}
           {menuState.type === 'folder' && (
             <>
               <button
@@ -410,7 +500,7 @@ export default function Sidebar({
                 className="menu-item menu-item-danger"
                 onClick={() => { onFolderDelete(menuState.id); setMenuState(null) }}
               >
-                Удалить
+                <Trash2 size={14} /> Удалить
               </button>
             </>
           )}
