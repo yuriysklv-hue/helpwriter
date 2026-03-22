@@ -1,4 +1,4 @@
-import { useEditor, EditorContent, BubbleMenu } from '@tiptap/react'
+import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import TextAlign from '@tiptap/extension-text-align'
@@ -35,6 +35,100 @@ function BubbleBtn({ onClick, active, title, children }) {
 
 function BubbleSep() {
   return <div className="bubble-sep" />
+}
+
+function FloatingToolbar({ editor, onLink }) {
+  const [coords, setCoords] = useState(null)
+
+  useEffect(() => {
+    if (!editor) return
+
+    const update = () => {
+      const { selection } = editor.state
+      if (selection.empty) {
+        setCoords(null)
+        return
+      }
+      try {
+        const start = editor.view.coordsAtPos(selection.from)
+        const end = editor.view.coordsAtPos(selection.to)
+        setCoords({
+          x: (start.left + end.left) / 2,
+          y: Math.min(start.top, end.top),
+        })
+      } catch {
+        setCoords(null)
+      }
+    }
+
+    editor.on('selectionUpdate', update)
+    editor.on('transaction', update)
+    return () => {
+      editor.off('selectionUpdate', update)
+      editor.off('transaction', update)
+    }
+  }, [editor])
+
+  if (!coords || !editor) return null
+
+  return (
+    <div
+      className="bubble-menu"
+      style={{
+        position: 'fixed',
+        top: coords.y - 50,
+        left: coords.x,
+        transform: 'translateX(-50%)',
+        zIndex: 200,
+      }}
+    >
+      <BubbleBtn onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive('bold')} title="Жирный">
+        <Bold size={14} />
+      </BubbleBtn>
+      <BubbleBtn onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive('italic')} title="Курсив">
+        <Italic size={14} />
+      </BubbleBtn>
+      <BubbleBtn onClick={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive('underline')} title="Подчёркнутый">
+        <UnderlineIcon size={14} />
+      </BubbleBtn>
+      <BubbleBtn onClick={() => editor.chain().focus().toggleStrike().run()} active={editor.isActive('strike')} title="Зачёркнутый">
+        <Strikethrough size={14} />
+      </BubbleBtn>
+      <BubbleBtn onClick={() => editor.chain().focus().toggleCode().run()} active={editor.isActive('code')} title="Код">
+        <Code size={14} />
+      </BubbleBtn>
+      <BubbleSep />
+      <BubbleBtn onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} active={editor.isActive('heading', { level: 1 })} title="H1">
+        <span className="bubble-btn-text">H1</span>
+      </BubbleBtn>
+      <BubbleBtn onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive('heading', { level: 2 })} title="H2">
+        <span className="bubble-btn-text">H2</span>
+      </BubbleBtn>
+      <BubbleBtn onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} active={editor.isActive('heading', { level: 3 })} title="H3">
+        <span className="bubble-btn-text">H3</span>
+      </BubbleBtn>
+      <BubbleSep />
+      <BubbleBtn onClick={onLink} active={editor.isActive('link')} title="Ссылка">
+        <Link2 size={14} />
+      </BubbleBtn>
+      <BubbleBtn onClick={() => editor.chain().focus().toggleHighlight().run()} active={editor.isActive('highlight')} title="Выделение">
+        <Highlighter size={14} />
+      </BubbleBtn>
+      <BubbleBtn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive('blockquote')} title="Цитата">
+        <Quote size={14} />
+      </BubbleBtn>
+      <BubbleSep />
+      <BubbleBtn onClick={() => editor.chain().focus().setTextAlign('left').run()} active={editor.isActive({ textAlign: 'left' })} title="По левому краю">
+        <AlignLeft size={14} />
+      </BubbleBtn>
+      <BubbleBtn onClick={() => editor.chain().focus().setTextAlign('center').run()} active={editor.isActive({ textAlign: 'center' })} title="По центру">
+        <AlignCenter size={14} />
+      </BubbleBtn>
+      <BubbleBtn onClick={() => editor.chain().focus().setTextAlign('right').run()} active={editor.isActive({ textAlign: 'right' })} title="По правому краю">
+        <AlignRight size={14} />
+      </BubbleBtn>
+    </div>
+  )
 }
 
 function SaveStatus({ saving, savedRecently }) {
@@ -167,119 +261,7 @@ export default function Editor({ content, onSave, onChange, saving, mode, onBack
       <div className="editor-scroll">
         <div className="editor-content-wrapper">
 
-          {/* ── Bubble menu ── */}
-          <BubbleMenu editor={editor} tippyOptions={{ duration: 150, placement: 'top' }}>
-            <div className="bubble-menu">
-              <BubbleBtn
-                onClick={() => editor.chain().focus().toggleBold().run()}
-                active={editor.isActive('bold')}
-                title="Жирный (Ctrl+B)"
-              >
-                <Bold size={14} />
-              </BubbleBtn>
-              <BubbleBtn
-                onClick={() => editor.chain().focus().toggleItalic().run()}
-                active={editor.isActive('italic')}
-                title="Курсив (Ctrl+I)"
-              >
-                <Italic size={14} />
-              </BubbleBtn>
-              <BubbleBtn
-                onClick={() => editor.chain().focus().toggleUnderline().run()}
-                active={editor.isActive('underline')}
-                title="Подчёркнутый (Ctrl+U)"
-              >
-                <UnderlineIcon size={14} />
-              </BubbleBtn>
-              <BubbleBtn
-                onClick={() => editor.chain().focus().toggleStrike().run()}
-                active={editor.isActive('strike')}
-                title="Зачёркнутый"
-              >
-                <Strikethrough size={14} />
-              </BubbleBtn>
-              <BubbleBtn
-                onClick={() => editor.chain().focus().toggleCode().run()}
-                active={editor.isActive('code')}
-                title="Код"
-              >
-                <Code size={14} />
-              </BubbleBtn>
-
-              <BubbleSep />
-
-              <BubbleBtn
-                onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-                active={editor.isActive('heading', { level: 1 })}
-                title="Заголовок 1"
-              >
-                <span className="bubble-btn-text">H1</span>
-              </BubbleBtn>
-              <BubbleBtn
-                onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-                active={editor.isActive('heading', { level: 2 })}
-                title="Заголовок 2"
-              >
-                <span className="bubble-btn-text">H2</span>
-              </BubbleBtn>
-              <BubbleBtn
-                onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
-                active={editor.isActive('heading', { level: 3 })}
-                title="Заголовок 3"
-              >
-                <span className="bubble-btn-text">H3</span>
-              </BubbleBtn>
-
-              <BubbleSep />
-
-              <BubbleBtn
-                onClick={handleLink}
-                active={editor.isActive('link')}
-                title="Ссылка"
-              >
-                <Link2 size={14} />
-              </BubbleBtn>
-              <BubbleBtn
-                onClick={() => editor.chain().focus().toggleHighlight().run()}
-                active={editor.isActive('highlight')}
-                title="Выделение"
-              >
-                <Highlighter size={14} />
-              </BubbleBtn>
-              <BubbleBtn
-                onClick={() => editor.chain().focus().toggleBlockquote().run()}
-                active={editor.isActive('blockquote')}
-                title="Цитата"
-              >
-                <Quote size={14} />
-              </BubbleBtn>
-
-              <BubbleSep />
-
-              <BubbleBtn
-                onClick={() => editor.chain().focus().setTextAlign('left').run()}
-                active={editor.isActive({ textAlign: 'left' })}
-                title="По левому краю"
-              >
-                <AlignLeft size={14} />
-              </BubbleBtn>
-              <BubbleBtn
-                onClick={() => editor.chain().focus().setTextAlign('center').run()}
-                active={editor.isActive({ textAlign: 'center' })}
-                title="По центру"
-              >
-                <AlignCenter size={14} />
-              </BubbleBtn>
-              <BubbleBtn
-                onClick={() => editor.chain().focus().setTextAlign('right').run()}
-                active={editor.isActive({ textAlign: 'right' })}
-                title="По правому краю"
-              >
-                <AlignRight size={14} />
-              </BubbleBtn>
-            </div>
-          </BubbleMenu>
-
+          <FloatingToolbar editor={editor} onLink={handleLink} />
           <EditorContent editor={editor} />
         </div>
       </div>
