@@ -1,7 +1,7 @@
 # Voice Assistant Bot (HelpWriter) — Контекст для Claude
 
-**Версия:** 3.0
-**Обновлено:** 14 марта 2026
+**Версия:** 3.1
+**Обновлено:** 22 марта 2026
 
 ---
 
@@ -157,6 +157,8 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 - `@tiptap/extension-superscript` — верхний индекс
 - `@tiptap/extension-subscript` — нижний индекс
 
+> ⚠️ **TipTap v3:** `BubbleMenu` **не экспортируется** из `@tiptap/react`. Вместо него используется кастомный компонент `FloatingToolbar` в `Editor.jsx`, который использует `editor.view.coordsAtPos()` для позиционирования плавающего тулбара. Не пытаться импортировать `BubbleMenu` из `@tiptap/react` — сборка упадёт с ошибкой.
+
 ### Тулбар (слева направо)
 Undo · Redo | Heading▾ (P/H1/H2/H3) · List▾ (bullet/numbered) · Outdent · Indent | **B** · *I* · ~~S~~ · `</>` · U̲ · Highlight · Link | x² · x₂ | Align L/C/R/J | Blockquote
 
@@ -289,6 +291,9 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```bash
 cd ~/voice_bot/web && npm install --legacy-peer-deps && npm run build
 ```
+
+**Ошибка `"BubbleMenu" is not exported by @tiptap/react`:**
+В TipTap v3 `BubbleMenu` убрали из пакета. Используй кастомный `FloatingToolbar` — он уже есть в `Editor.jsx`. Не добавляй `BubbleMenu` в импорты.
 
 **Убедиться что запущен ПРАВИЛЬНЫЙ бот (не старый):**
 ```bash
