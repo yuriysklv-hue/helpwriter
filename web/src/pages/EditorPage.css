@@ -2,19 +2,72 @@
   display: flex;
   height: 100vh;
   overflow: hidden;
+  background: var(--bg-primary);
+  font-family: var(--font-ui);
 }
 
 .editor-main {
   flex: 1;
-  overflow-y: auto;
-  background: white;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
 }
 
 .editor-empty {
+  flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
-  color: #999;
-  font-size: 1rem;
+  gap: 12px;
+  color: var(--text-tertiary);
+  font-size: 0.9375rem;
+  font-family: var(--font-ui);
+  padding: 32px;
+  text-align: center;
+}
+
+.editor-empty p {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* ── Responsive: mobile ───────────────────────────────────────── */
+@media (max-width: 767px) {
+  .editor-page {
+    position: relative;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 100;
+    transform: translateX(0);
+    transition: transform var(--transition-slow);
+    box-shadow: var(--shadow-lg);
+  }
+
+  /* When doc is active: hide sidebar, show editor */
+  .editor-page.has-doc .sidebar {
+    transform: translateX(-100%);
+  }
+
+  /* When no doc: hide editor main */
+  .editor-page:not(.has-doc) .editor-main {
+    display: none;
+  }
+
+  .editor-scroll {
+    padding: 16px 12px 48px;
+  }
+
+  .editor-content-wrapper {
+    padding: 24px 20px;
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--bg-primary);
+  }
 }

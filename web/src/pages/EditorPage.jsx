@@ -4,10 +4,9 @@ import Editor from '../components/Editor'
 import api from '../api/client'
 import './EditorPage.css'
 
-// Convert plain text (old bot documents) to HTML paragraphs for TipTap
 function normalizeContent(content) {
   if (!content) return '<p></p>'
-  if (content.trim().startsWith('<')) return content  // already HTML
+  if (content.trim().startsWith('<')) return content
   return content.split(/\n\n+/)
     .filter(p => p.trim())
     .map(p => `<p>${p.trim().replace(/\n/g, '<br>')}</p>`)
@@ -20,14 +19,12 @@ export default function EditorPage() {
   const [selectedView, setSelectedView] = useState({ type: 'inbox' })
   const [activeDoc, setActiveDoc] = useState(null)
   const [saving, setSaving] = useState(false)
-  const currentHtmlRef = useRef(null)  // latest unsaved HTML from editor
+  const currentHtmlRef = useRef(null)
 
-  // Load folders once on mount
   useEffect(() => {
     api.get('/folders').then(res => setFolders(res.data)).catch(console.error)
   }, [])
 
-  // Load documents whenever selected view changes
   useEffect(() => {
     const params = {}
     if (selectedView.type === 'inbox') {
@@ -72,7 +69,6 @@ export default function EditorPage() {
 
   const handleSelect = useCallback(async (doc) => {
     if (doc.id === activeDoc?.id) return
-    // Auto-save current doc before switching
     if (currentHtmlRef.current && activeDoc) {
       api.put(`/documents/${activeDoc.id}`, { content: currentHtmlRef.current }).catch(() => {})
       currentHtmlRef.current = null
@@ -85,12 +81,19 @@ export default function EditorPage() {
     }
   }, [activeDoc])
 
-  // ── Folder handlers ──────────────────────────────────────────────────────
+  const handleBack = useCallback(() => {
+    if (currentHtmlRef.current && activeDoc) {
+      api.put(`/documents/${activeDoc.id}`, { content: currentHtmlRef.current }).catch(() => {})
+      currentHtmlRef.current = null
+    }
+    setActiveDoc(null)
+  }, [activeDoc])
+
+  // ── Folder handlers ───────────────────────────────────────────
 
   const handleFolderCreate = useCallback(async (name) => {
     try {
       await api.post('/folders', { name })
-      // Reload to get server-sorted list
       const res = await api.get('/folders')
       setFolders(res.data)
     } catch (e) {
@@ -101,7 +104,6 @@ export default function EditorPage() {
   const handleFolderRename = useCallback(async (id, name) => {
     try {
       await api.put(`/folders/${id}`, { name })
-      // Reload to get correctly sorted list after rename
       const res = await api.get('/folders')
       setFolders(res.data)
     } catch (e) {
@@ -112,10 +114,8 @@ export default function EditorPage() {
   const handleFolderDelete = useCallback(async (id) => {
     try {
       await api.delete(`/folders/${id}`)
-      // Reload all folders — cascade on server may have deleted children too
       const res = await api.get('/folders')
       setFolders(res.data)
-      // If current view is a folder that no longer exists, go to inbox
       if (selectedView.type === 'folder' && !res.data.find(f => f.id === selectedView.id)) {
         setSelectedView({ type: 'inbox' })
       }
@@ -127,7 +127,6 @@ export default function EditorPage() {
   const handleMoveDocument = useCallback(async (docId, folderId) => {
     try {
       await api.put(`/documents/${docId}/move`, { folder_id: folderId })
-      // Remove doc from current view (it moved elsewhere)
       setDocuments(prev => prev.filter(d => d.id !== docId))
       if (activeDoc?.id === docId) {
         setActiveDoc(null)
@@ -156,8 +155,13 @@ export default function EditorPage() {
     window.location.href = '/login'
   }
 
+  // Compute viewTitle for the editor back button
+  const viewTitle = selectedView?.type === 'inbox'
+    ? 'Новые'
+    : folders.find(f => f.id === selectedView?.id)?.name || 'Папка'
+
   return (
-    <div className="editor-page">
+    <div className={`editor-page${activeDoc ? ' has-doc' : ''}`}>
       <Sidebar
         documents={documents}
         folders={folders}
@@ -180,6 +184,9 @@ export default function EditorPage() {
             onSave={handleSave}
             onChange={handleChange}
             saving={saving}
+            mode={activeDoc.mode}
+            onBack={handleBack}
+            viewTitle={viewTitle}
           />
         ) : (
           <div className="editor-empty">

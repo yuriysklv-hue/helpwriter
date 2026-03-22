@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import Login from './pages/Login'
 import EditorPage from './pages/EditorPage'
 import api from './api/client'
+import { ThemeProvider } from './contexts/ThemeContext'
 
 export default function App() {
   const [authed, setAuthed] = useState(null)
@@ -14,7 +15,9 @@ export default function App() {
 
   if (authed === null) return null
 
-  if (!authed) return <Login />
-
-  return <EditorPage />
+  return (
+    <ThemeProvider>
+      {!authed ? <Login /> : <EditorPage />}
+    </ThemeProvider>
+  )
 }
