@@ -6,8 +6,9 @@ from typing import Optional
 from fastapi import APIRouter, Cookie, HTTPException, Query
 
 from api.deps import get_current_user_id
-from api.models import Document, DocumentsResponse, DocumentUpdate, MoveDocument
+from api.models import Document, DocumentCreate, DocumentsResponse, DocumentUpdate, MoveDocument
 from database import (
+    create_document,
     get_document_by_id,
     get_user_documents,
     update_document,
@@ -16,6 +17,25 @@ from database import (
 )
 
 router = APIRouter()
+
+
+@router.post("", response_model=Document, status_code=201)
+async def create_doc(
+    body: DocumentCreate,
+    access_token: Optional[str] = Cookie(None),
+):
+    """Create a new empty document from the web editor."""
+    user_id = get_current_user_id(access_token)
+    doc_id = create_document(
+        user_id=user_id,
+        content=body.content or "",
+        mode=body.mode or "transcription",
+        title=body.title or None,
+        source="web",
+        folder_id=body.folder_id,
+    )
+    doc = get_document_by_id(doc_id=doc_id, user_id=user_id)
+    return doc
 
 
 @router.get("", response_model=DocumentsResponse)

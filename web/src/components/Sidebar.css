@@ -1,5 +1,6 @@
 /* ── Sidebar container ──────────────────────────────────────── */
 .sidebar {
+  position: relative;
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
   background: var(--bg-secondary);
@@ -505,6 +506,71 @@
   padding: 6px 12px;
   font-size: 0.8rem;
   color: var(--text-tertiary);
+}
+
+/* ── FAB: создать документ ───────────────────────────────────── */
+.fab-create-doc {
+  position: absolute;
+  bottom: 20px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  transition: background var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+  z-index: 10;
+}
+
+.fab-create-doc:hover {
+  background: var(--accent-active);
+  transform: scale(1.07);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+}
+
+.fab-create-doc:active {
+  transform: scale(0.96);
+}
+
+/* ── Inline doc creation row ─────────────────────────────────── */
+.doc-create-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+
+.doc-create-icon {
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.doc-create-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.doc-create-input::placeholder {
+  color: var(--text-tertiary);
+  font-weight: 400;
 }
 
 /* ── Staggered animations ─────────────────────────────────────── */

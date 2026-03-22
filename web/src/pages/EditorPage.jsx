@@ -150,6 +150,31 @@ export default function EditorPage() {
     }
   }, [activeDoc])
 
+  const handleDocumentCreate = useCallback(async (title) => {
+    // Auto-save current doc before switching
+    if (currentHtmlRef.current && activeDoc) {
+      api.put(`/documents/${activeDoc.id}`, { content: currentHtmlRef.current }).catch(() => {})
+      currentHtmlRef.current = null
+    }
+    try {
+      const folderId = selectedView.type === 'folder' ? selectedView.id : null
+      const res = await api.post('/documents', {
+        title: title || null,
+        content: '',
+        mode: 'transcription',
+        folder_id: folderId,
+      })
+      const newDoc = { ...res.data, content: normalizeContent(res.data.content) }
+      setDocuments(prev => [
+        { id: newDoc.id, title: newDoc.title, preview: '', mode: newDoc.mode, source: newDoc.source, created_at: newDoc.created_at, updated_at: newDoc.updated_at, folder_id: newDoc.folder_id },
+        ...prev,
+      ])
+      setActiveDoc(newDoc)
+    } catch (e) {
+      console.error('Failed to create document', e)
+    }
+  }, [activeDoc, selectedView])
+
   const handleLogout = async () => {
     await api.post('/auth/logout')
     window.location.href = '/login'
@@ -172,6 +197,7 @@ export default function EditorPage() {
         onFolderCreate={handleFolderCreate}
         onFolderRename={handleFolderRename}
         onFolderDelete={handleFolderDelete}
+        onDocumentCreate={handleDocumentCreate}
         onMoveDocument={handleMoveDocument}
         onDeleteDocument={handleDeleteDocument}
         onLogout={handleLogout}
