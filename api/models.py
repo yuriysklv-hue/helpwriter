@@ -48,6 +48,13 @@ class DocumentsResponse(BaseModel):
     offset: int
 
 
+class DocumentCreate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    mode: Optional[str] = None
+    folder_id: Optional[int] = None
+
+
 class DocumentUpdate(BaseModel):
     content: Optional[str] = None
     title: Optional[str] = None

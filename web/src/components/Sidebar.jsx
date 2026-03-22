@@ -200,6 +200,7 @@ export default function Sidebar({
   selectedView,
   onSelect,
   onViewSelect,
+  onDocumentCreate,
   onFolderCreate,
   onFolderRename,
   onFolderDelete,
@@ -215,6 +216,8 @@ export default function Sidebar({
   const [renamingId, setRenamingId] = useState(null)
   const [renameValue, setRenameValue] = useState('')
   const [menuState, setMenuState] = useState(null)
+  const [creatingDoc, setCreatingDoc] = useState(false)
+  const [newDocTitle, setNewDocTitle] = useState('')
 
   const skipBlurRef = useRef(false)
   const tree = useMemo(() => buildTree(folders), [folders])
@@ -273,6 +276,17 @@ export default function Sidebar({
     skipBlurRef.current = true
     setRenamingId(null)
     setRenameValue('')
+  }
+
+  const handleNewDocKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      onDocumentCreate(newDocTitle.trim())
+      setNewDocTitle('')
+      setCreatingDoc(false)
+    } else if (e.key === 'Escape') {
+      setNewDocTitle('')
+      setCreatingDoc(false)
+    }
   }
 
   const handleNewFolderKeyDown = (e) => {
@@ -379,7 +393,22 @@ export default function Sidebar({
 
         {/* ── Список документов ── */}
         <div className="doc-list">
-          {!hasAnyDocs && (
+          {creatingDoc && (
+            <div className="doc-create-row">
+              <span className="doc-create-icon">📄</span>
+              <input
+                className="doc-create-input"
+                autoFocus
+                value={newDocTitle}
+                onChange={e => setNewDocTitle(e.target.value)}
+                onKeyDown={handleNewDocKeyDown}
+                onBlur={() => { setCreatingDoc(false); setNewDocTitle('') }}
+                placeholder="Название документа..."
+              />
+            </div>
+          )}
+
+          {!hasAnyDocs && !creatingDoc && (
             <p className="empty-hint">
               {searchQuery.trim()
                 ? 'Ничего не найдено'
@@ -428,6 +457,15 @@ export default function Sidebar({
         </div>
 
       </div>
+
+      {/* ── FAB: создать документ ── */}
+      <button
+        className="fab-create-doc"
+        title="Создать документ"
+        onClick={() => { setCreatingDoc(true); setNewDocTitle('') }}
+      >
+        <Plus size={20} />
+      </button>
 
       {/* ── Контекстное меню ── */}
       {menuState && (

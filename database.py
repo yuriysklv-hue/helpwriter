@@ -681,6 +681,7 @@ def create_document(
     mode: str,
     title: str = None,
     source: str = "bot",
+    folder_id: int = None,
 ) -> int:
     """Create a document. Auto-generates title if not provided. Returns document.id."""
     if not title:
@@ -688,8 +689,8 @@ def create_document(
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO documents (user_id, title, content, mode, source) VALUES (?, ?, ?, ?, ?)",
-        (user_id, title, content, mode, source),
+        "INSERT INTO documents (user_id, title, content, mode, source, folder_id) VALUES (?, ?, ?, ?, ?, ?)",
+        (user_id, title, content, mode, source, folder_id),
     )
     doc_id = cursor.lastrowid
     conn.commit()
